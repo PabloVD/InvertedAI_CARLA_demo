@@ -24,31 +24,8 @@ from numpy import random
 
 from invertedai_tools import *
 
-def get_actor_blueprints(world, filter, generation):
-    bps = world.get_blueprint_library().filter(filter)
+def argument_parser():
 
-    if generation.lower() == "all":
-        return bps
-
-    # If the filter returns only one bp, we assume that this one needed
-    # and therefore, we ignore the generation
-    if len(bps) == 1:
-        return bps
-
-    try:
-        int_generation = int(generation)
-        # Check if generation is in available generations
-        if int_generation in [1, 2, 3, 4]:
-            bps = [x for x in bps if int(x.get_attribute('generation')) == int_generation]
-            return bps
-        else:
-            print("   Warning! Actor Generation is not valid. No actor will be spawned.")
-            return []
-    except:
-        print("   Warning! Actor Generation is not valid. No actor will be spawned.")
-        return []
-
-def main():
     argparser = argparse.ArgumentParser(
         description=__doc__)
     argparser.add_argument(
@@ -104,10 +81,7 @@ def main():
         default=8000,
         type=int,
         help='Port to communicate with TM (default: 8000)')
-    argparser.add_argument(
-        '--asynch',
-        action='store_true',
-        help='Activate asynchronous mode execution')
+    
     argparser.add_argument(
         '--hybrid',
         action='store_true',
@@ -210,60 +184,90 @@ def main():
 
     args = argparser.parse_args()
 
+    return args
+
+def get_actor_blueprints(world, filter, generation):
+    bps = world.get_blueprint_library().filter(filter)
+
+    if generation.lower() == "all":
+        return bps
+
+    # If the filter returns only one bp, we assume that this one needed
+    # and therefore, we ignore the generation
+    if len(bps) == 1:
+        return bps
+
+    try:
+        int_generation = int(generation)
+        # Check if generation is in available generations
+        if int_generation in [1, 2, 3, 4]:
+            bps = [x for x in bps if int(x.get_attribute('generation')) == int_generation]
+            return bps
+        else:
+            print("   Warning! Actor Generation is not valid. No actor will be spawned.")
+            return []
+    except:
+        print("   Warning! Actor Generation is not valid. No actor will be spawned.")
+        return []
+
+
+def set_spectator(world, hero_v):
+
+    spectator_offset_x = 1.5
+    spectator_offset_z = 1.3
+    spectator_offset_pitch = -3
+
+    hero_t = hero_v.get_transform()
+
+    yaw = hero_t.rotation.yaw
+    spectator_l = hero_t.location + carla.Location(
+        spectator_offset_x * math.cos(math.radians(yaw)),
+        spectator_offset_x * math.sin(math.radians(yaw)),
+        spectator_offset_z,
+    )
+    spectator_t = carla.Transform(spectator_l, hero_t.rotation)
+    spectator_t.rotation.pitch -= spectator_offset_pitch
+    world.get_spectator().set_transform(spectator_t)
+
+
+def main():
+
+    args = argument_parser()
+
     logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
+
+    FPS = 10
+    
+    client, world = setup_carla_environment(args)
+
+    # client = carla.Client(args.host, args.port)
+    # client.set_timeout(10.0)
+    # synchronous_master = False
+    # world = client.get_world()
+
+    random.seed(args.seed if args.seed is not None else int(time.time()))
 
     vehicles_list = []
     walkers_list = []
     all_id = []
-    client = carla.Client(args.host, args.port)
-    client.set_timeout(10.0)
-    synchronous_master = False
-    random.seed(args.seed if args.seed is not None else int(time.time()))
-
-    world = client.get_world()
 
     #iai
     response, location_info_response = initialize_simulation(args)
     agent_properties = response.agent_properties
-    map_center = args.map_center
 
-    vehicle_blueprints = get_blueprint_dictionary(world, client)
+    # vehicle_blueprints = get_blueprint_dictionary(world, client)
+    vehicle_blueprints = world.get_blueprint_library().filter("vehicle*")
+    
 
     iai_to_carla_mapping, agent_properties, agent_states_new, recurrent_states_new = assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_properties,response.agent_states,response.recurrent_states)
     response.agent_states = agent_states_new
     response.recurrent_states = recurrent_states_new
-    tick(iai_to_carla_mapping,response,world)
+    carla_tick(iai_to_carla_mapping,response,world)
+
+    # print(response.agent_states)
+    # print(response.recurrent_states)
 
     try:
-        # world = client.get_world()
-        # setup_carla_environment(args)
-
-        # traffic_manager = client.get_trafficmanager(args.tm_port)
-        # traffic_manager.set_global_distance_to_leading_vehicle(2.5)
-        # traffic_manager.global_percentage_speed_difference(40.0)
-        # if args.respawn:
-        #     traffic_manager.set_respawn_dormant_vehicles(True)
-        # if args.hybrid:
-        #     traffic_manager.set_hybrid_physics_mode(True)
-        #     traffic_manager.set_hybrid_physics_radius(70.0)
-        # if args.seed is not None:
-        #     traffic_manager.set_random_device_seed(args.seed)
-
-        settings = world.get_settings()
-
-        # FPS = 30
-        FPS = 10
-        # traffic_manager.set_synchronous_mode(True)
-        if not settings.synchronous_mode:
-            synchronous_master = True
-            settings.synchronous_mode = True
-            settings.fixed_delta_seconds = 1 / FPS
-        else:
-            synchronous_master = False
-
-        if args.no_rendering:
-            settings.no_rendering_mode = True
-        world.apply_settings(settings)
 
         blueprints = get_actor_blueprints(world, args.filterv, args.generationv)
         print(blueprints)
@@ -273,36 +277,20 @@ def main():
         if not blueprintsWalkers:
             raise ValueError("Couldn't find any walkers with the specified filters")
 
-        # if args.safe:
-        #     blueprints = [x for x in blueprints if x.get_attribute('base_type') == 'car']
-
-        # blueprints = sorted(blueprints, key=lambda bp: bp.id)
-
         tmap = world.get_map()
 
         ############### CHANGES HERE ###############
         duration = 50       # s
         pedestrian_amount = 20
-        #ego_location = carla.Location( 74, -67, 0)
-        #ego_location = carla.Location(-48, 85, 0)
-        #ego_location = carla.Location( -103, -5, 0)
-        #ego_location = carla.Location( -52, -42, 0)
-        #ego_location = carla.Location( -88, 28, 0)
-        #ego_location = carla.Location( -60, 140, 0)
-        #ego_location = carla.Location( -41.5, 180, 0)
+        
         ego_location = carla.Location( -45, 103, 0)
 
-        spectator_offset_x = 1.5
-        spectator_offset_z = 1.3
-        spectator_offset_pitch = -3
+        
 
         pedestrian_dist = 50
         pedestrian_point = 100
 
-        side_dist = 20
-        opposite_dist = 60
-        opposite_interval = 20
-        opposite_amount = 8
+        
         same_dist = 40
         same_interval = 20
         #############################################
@@ -310,50 +298,11 @@ def main():
         spawn_transforms = []
         ego_wp = tmap.get_waypoint(ego_location)
         ego_lane_wps = [ego_wp]
-        opposite_lane_wps = []
         spawn_transforms.append(ego_wp.transform)
 
-        # Vehicle to the side
-        # right_wp = ego_wp.get_right_lane()
-        # if right_wp is not None and right_wp.lane_type == carla.LaneType.Driving:
-        #     print("Found a right lane, spawnign a vehicle")
-        #     dist = 0
-        #     while dist == 0:
-        #         dist = random.randint(-side_dist, side_dist)
-        #     right_wp = right_wp.next(dist)[0] if dist > 0 else right_wp.previous(-dist)[0]
-        #     spawn_transforms.append(right_wp.transform)
-        #     ego_lane_wps.append(right_wp)
+        vehicles = world.get_actors().filter('vehicle.*')
+        print(len(agent_properties),len(vehicles))
 
-        # left_wp = ego_wp.get_left_lane()
-        # if left_wp is not None and left_wp.lane_id * ego_wp.lane_id > 0:  # Same direction
-        #     print("Found a left lane, spawning a vehicle")
-        #     dist = 0
-        #     while dist == 0:
-        #         dist = random.randint(-side_dist, side_dist)
-        #     left_wp = left_wp.next(dist)[0] if dist > 0 else left_wp.previous(-dist)[0]
-        #     spawn_transforms.append(left_wp.transform)
-        #     ego_lane_wps.append(left_wp)
-
-        #     opposite_lane_wp = left_wp.get_left_lane()
-
-        # elif left_wp is not None:
-        #     opposite_lane_wp = left_wp
-
-        # if opposite_lane_wp is not None:
-        #     opposite_lane_wps.append(opposite_lane_wp)
-        #     opposite_lane_wp_2 = opposite_lane_wp.get_right_lane()
-        #     if opposite_lane_wp_2 is not None and right_wp.lane_type == carla.LaneType.Driving:
-        #         opposite_lane_wps.append(opposite_lane_wp_2)
-
-        # for spawn_wp in opposite_lane_wps:
-        #     print("Found an opposite lane, spawning a vehicle")
-
-        #     for _ in range(opposite_amount):
-        #         dist = 0
-        #         while dist == 0:
-        #             dist = opposite_dist + random.randint(-opposite_interval, opposite_interval)
-        #         spawn_wp = spawn_wp.previous(dist)[0]
-        #         spawn_transforms.append(spawn_wp.transform)
 
         for wp in ego_lane_wps:
             print("Found an ego lane, spawning a vehicle")
@@ -377,6 +326,8 @@ def main():
         # print("transf",spawn_transforms)
         spawn_transforms = []
 
+        world.get_map().get_spawn_points()
+
         vehicles = world.get_actors().filter('vehicle.*')
 
         batch = []
@@ -397,6 +348,7 @@ def main():
                 blueprint.set_attribute('color', color)
 
             actor = world.try_spawn_actor(blueprint, spawn_transform)
+            print("actor",actor)
 
             # batch.append(carla.command.SpawnActor(blueprint, spawn_transform)
             #     .then(carla.command.SetAutopilot(carla.command.FutureActor, True, traffic_manager.get_port())))
@@ -473,10 +425,7 @@ def main():
             all_id.append(walkers_list[i]["id"])
         all_actors = world.get_actors(all_id)
 
-        if args.asynch or not synchronous_master:
-            world.wait_for_tick()
-        else:
-            world.tick()
+        world.tick()
 
         world.set_pedestrians_cross_factor(0.0)
         for i in range(0, len(all_id), 2):
@@ -487,10 +436,6 @@ def main():
         print('spawned %d vehicles and %d walkers, press Ctrl+C to exit.' % (len(vehicles_list), len(walkers_list)))
 
         for _ in range(duration * FPS):
-            # if not args.asynch and synchronous_master:
-            #     world.tick()
-            # else:
-            #     world.wait_for_tick()
 
             #iai
             response = iai.large_drive(
@@ -504,29 +449,15 @@ def main():
                 random_seed = random.randint(1,10000)
             )
 
-            tick(iai_to_carla_mapping,response,world)
+            carla_tick(iai_to_carla_mapping,response,world)
 
-            hero_t = hero_v.get_transform()
-            hero_w = hero_t.get_forward_vector()
+            set_spectator(world, hero_v)
 
-            yaw = hero_t.rotation.yaw
-            spectator_l = hero_t.location + carla.Location(
-                spectator_offset_x * math.cos(math.radians(yaw)),
-                spectator_offset_x * math.sin(math.radians(yaw)),
-                spectator_offset_z,
-            )
-            spectator_t = carla.Transform(spectator_l, hero_t.rotation)
-            spectator_t.rotation.pitch -= spectator_offset_pitch
-            world.get_spectator().set_transform(spectator_t)
+            
 
     finally:
 
-        if not args.asynch and synchronous_master:
-            settings = world.get_settings()
-            settings.synchronous_mode = False
-            settings.no_rendering_mode = False
-            settings.fixed_delta_seconds = None
-            world.apply_settings(settings)
+
 
         print('\ndestroying %d vehicles' % len(vehicles_list))
         client.apply_batch([carla.command.DestroyActor(x) for x in vehicles_list])

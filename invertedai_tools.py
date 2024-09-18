@@ -143,7 +143,8 @@ def assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_propert
     recurrent_states_new = []
     new_agent_id = 0
     for agent_id, (state, attr) in enumerate(zip(agent_states,agent_properties)):
-        blueprint = match_carla_actor(attr,vehicle_blueprints)
+        #blueprint = match_carla_actor(attr,vehicle_blueprints)
+        blueprint = random.choice(vehicle_blueprints)
         agent_transform = transform_iai_to_carla(state)
 
         if agent_id==0: blueprint.set_attribute('role_name', 'hero')
@@ -209,7 +210,7 @@ def set_traffic_lights(traffic_lights_states,carla_lights):
         carla_tl_id = tl_id
         carla_lights[carla_tl_id].set_light(get_traffic_light_state_from_iai(state))
 
-def tick(iai_to_carla_mapping,response,world):
+def carla_tick(iai_to_carla_mapping,response,world):
     """
     Tick the carla simulation forward one time step
     Assume carla_actors is a list of carla actors controlled by IAI
@@ -269,11 +270,13 @@ def main(args):
 
     #vehicle_blueprints = get_vehicle_blueprint_list(world)
     vehicle_blueprints = get_blueprint_dictionary(world, client)
+    
+
 
     iai_to_carla_mapping, agent_properties, agent_states_new, recurrent_states_new = assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_properties,response.agent_states,response.recurrent_states)
     response.agent_states = agent_states_new
     response.recurrent_states = recurrent_states_new
-    tick(iai_to_carla_mapping,response,world)
+    carla_tick(iai_to_carla_mapping,response,world)
 
     #################################################################################################
     # Run simulation
@@ -324,7 +327,7 @@ def main(args):
             random_seed = random.randint(1,10000)
         )
 
-        tick(iai_to_carla_mapping,response,world)
+        carla_tick(iai_to_carla_mapping,response,world)
 
         if args.save_sim_gif: scene_plotter.record_step(
             [AgentState.fromlist([
