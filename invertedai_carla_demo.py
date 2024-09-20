@@ -24,6 +24,7 @@ from numpy import random
 
 from invertedai_tools import *
 
+
 def argument_parser():
 
     argparser = argparse.ArgumentParser(
@@ -213,7 +214,7 @@ def get_actor_blueprints(world, filter, generation):
 
 def set_spectator(world, hero_v):
 
-    spectator_offset_x = 1.5
+    spectator_offset_x = 1.#5
     spectator_offset_z = 1.3
     spectator_offset_pitch = -3
 
@@ -234,34 +235,40 @@ def main():
 
     args = argument_parser()
 
-    logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
+    # logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
 
     FPS = 10
     
     client, world = setup_carla_environment(args)
 
-    # client = carla.Client(args.host, args.port)
-    # client.set_timeout(10.0)
-    # synchronous_master = False
-    # world = client.get_world()
+    logfile = os.getcwd()+"/logs/record.log"
+    client.start_recorder(logfile)
+    print("Recording on file: %s" % logfile)
 
     random.seed(args.seed if args.seed is not None else int(time.time()))
 
     vehicles_list = []
     walkers_list = []
     all_id = []
+    
+    iai_seed = args.seed #random.randint(1,10000)
 
     #iai
     response, location_info_response = initialize_simulation(args)
     agent_properties = response.agent_properties
+    
 
     # vehicle_blueprints = get_blueprint_dictionary(world, client)
-    vehicle_blueprints = world.get_blueprint_library().filter("vehicle*")
+    # vehicle_blueprints = world.get_blueprint_library().filter("vehicle*")
+    vehicle_blueprints = get_vehicle_blueprint_list(world)
     
 
     iai_to_carla_mapping, agent_properties, agent_states_new, recurrent_states_new = assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_properties,response.agent_states,response.recurrent_states)
+    traffic_lights_states = assign_iai_traffic_lights_from_carla(world,response.traffic_lights_states)
     response.agent_states = agent_states_new
     response.recurrent_states = recurrent_states_new
+    response.traffic_lights_states = traffic_lights_states
+
     carla_tick(iai_to_carla_mapping,response,world)
 
     # print(response.agent_states)
@@ -270,7 +277,7 @@ def main():
     try:
 
         blueprints = get_actor_blueprints(world, args.filterv, args.generationv)
-        print(blueprints)
+        
         # if not blueprints:
         #     raise ValueError("Couldn't find any vehicles with the specified filters")
         blueprintsWalkers = get_actor_blueprints(world, args.filterw, args.generationw)
@@ -281,7 +288,7 @@ def main():
 
         ############### CHANGES HERE ###############
         duration = 50       # s
-        pedestrian_amount = 20
+        pedestrian_amount = 0   # 20
         
         ego_location = carla.Location( -45, 103, 0)
 
@@ -301,68 +308,12 @@ def main():
         spawn_transforms.append(ego_wp.transform)
 
         vehicles = world.get_actors().filter('vehicle.*')
-        print(len(agent_properties),len(vehicles))
-
-
-        for wp in ego_lane_wps:
-            print("Found an ego lane, spawning a vehicle")
-            dist = 0
-            while dist == 0:
-                dist = same_dist + random.randint(-same_interval, same_interval)
-            spawn_wp = wp.previous(dist)[0]
-            spawn_transforms.append(spawn_wp.transform)
-
-            dist = 0
-            while dist == 0:
-                dist = same_dist + random.randint(-same_interval, same_interval)
-            spawn_wp = wp.next(dist)[0]
-            spawn_transforms.append(spawn_wp.transform)
-            dist = 0
-            while dist == 0:
-                dist = same_dist + random.randint(-same_interval, same_interval)
-            spawn_wp = wp.next(dist)[0]
-            spawn_transforms.append(spawn_wp.transform)
-
-        # print("transf",spawn_transforms)
-        spawn_transforms = []
-
-        world.get_map().get_spawn_points()
+        print("IAI vehicles:",len(agent_properties),"CARLA vehicles",len(vehicles))
 
         vehicles = world.get_actors().filter('vehicle.*')
 
         batch = []
-        hero = True
-        for spawn_transform in spawn_transforms:
-
-            spawn_transform.location.z += 0.5
-            blueprint = random.choice(blueprints)
-            if hero:
-                blueprint = world.get_blueprint_library().filter('*mkz*')[0]
-                blueprint.set_attribute('role_name', 'hero')
-                hero = False
-            else:
-                blueprint.set_attribute('role_name', 'autopilot')
-
-            if blueprint.has_attribute('color'):
-                color = random.choice(blueprint.get_attribute('color').recommended_values)
-                blueprint.set_attribute('color', color)
-
-            actor = world.try_spawn_actor(blueprint, spawn_transform)
-            print("actor",actor)
-
-            # batch.append(carla.command.SpawnActor(blueprint, spawn_transform)
-            #     .then(carla.command.SetAutopilot(carla.command.FutureActor, True, traffic_manager.get_port())))
-
-        # for response in client.apply_batch_sync(batch, synchronous_master):
-        #     if response.error:
-        #         logging.error(response.error)
-        #     else:
-        #         vehicles_list.append(response.actor_id)
-
-        # if args.car_lights_on:
-        #     all_vehicle_actors = world.get_actors(vehicles_list)
-        #     for actor in all_vehicle_actors:
-        #         traffic_manager.update_vehicle_lights(actor, True)
+        
 
         # Get hero vehicle
         hero_v = None
@@ -372,42 +323,42 @@ def main():
                 hero_v = vehicle
                 break
 
-        spawn_points = []
-        hero_start_point = ego_wp.transform.location
-        hero_end_point = ego_wp.next(pedestrian_point)[0].transform.location
-        for i in range(pedestrian_amount):
-            spawn_point = carla.Transform()
-            loc = None
-            while loc is None:
-                loc = world.get_random_location_from_navigation()
-                if loc.distance(hero_start_point) < pedestrian_dist or loc.distance(hero_end_point) < pedestrian_dist:
-                    spawn_point.location = loc
-                    spawn_point.location.z += 2
-                    spawn_points.append(spawn_point)
-                else:
-                    loc = None
+        # spawn_points = []
+        # hero_start_point = ego_wp.transform.location
+        # hero_end_point = ego_wp.next(pedestrian_point)[0].transform.location
+        # for i in range(pedestrian_amount):
+        #     spawn_point = carla.Transform()
+        #     loc = None
+        #     while loc is None:
+        #         loc = world.get_random_location_from_navigation()
+        #         if loc.distance(hero_start_point) < pedestrian_dist or loc.distance(hero_end_point) < pedestrian_dist:
+        #             spawn_point.location = loc
+        #             spawn_point.location.z += 2
+        #             spawn_points.append(spawn_point)
+        #         else:
+        #             loc = None
 
-        batch = []
-        walker_speed = []
-        for spawn_point in spawn_points:
-            walker_bp = random.choice(blueprintsWalkers)
-            if walker_bp.has_attribute('is_invincible'):
-                walker_bp.set_attribute('is_invincible', 'false')
-            if walker_bp.has_attribute('speed'):
-                walker_speed.append(walker_bp.get_attribute('speed').recommended_values[1])
-            else:
-                print("Walker has no speed")
-                walker_speed.append(0.0)
-            batch.append(carla.command.SpawnActor(walker_bp, spawn_point))
-        results = client.apply_batch_sync(batch, True)
-        walker_speed2 = []
-        for i in range(len(results)):
-            if results[i].error:
-                logging.error(results[i].error)
-            else:
-                walkers_list.append({"id": results[i].actor_id})
-                walker_speed2.append(walker_speed[i])
-        walker_speed = walker_speed2
+        # batch = []
+        # walker_speed = []
+        # for spawn_point in spawn_points:
+        #     walker_bp = random.choice(blueprintsWalkers)
+        #     if walker_bp.has_attribute('is_invincible'):
+        #         walker_bp.set_attribute('is_invincible', 'false')
+        #     if walker_bp.has_attribute('speed'):
+        #         walker_speed.append(walker_bp.get_attribute('speed').recommended_values[1])
+        #     else:
+        #         print("Walker has no speed")
+        #         walker_speed.append(0.0)
+        #     batch.append(carla.command.SpawnActor(walker_bp, spawn_point))
+        # results = client.apply_batch_sync(batch, True)
+        # walker_speed2 = []
+        # for i in range(len(results)):
+        #     if results[i].error:
+        #         logging.error(results[i].error)
+        #     else:
+        #         walkers_list.append({"id": results[i].actor_id})
+        #         walker_speed2.append(walker_speed[i])
+        # walker_speed = walker_speed2
 
         batch = []
         walker_controller_bp = world.get_blueprint_library().find('controller.ai.walker')
@@ -437,16 +388,19 @@ def main():
 
         for _ in range(duration * FPS):
 
+            response.traffic_lights_states = assign_iai_traffic_lights_from_carla(world,response.traffic_lights_states)
+
             #iai
             response = iai.large_drive(
                 location = args.location,
                 agent_states = response.agent_states,
                 agent_properties = agent_properties,
                 recurrent_states = response.recurrent_states,
-                light_recurrent_states = response.light_recurrent_states,
+                traffic_lights_states = response.traffic_lights_states,
+                light_recurrent_states = None,
                 single_call_agent_limit = args.capacity,
                 async_api_calls = args.is_async,
-                random_seed = random.randint(1,10000)
+                random_seed = iai_seed
             )
 
             carla_tick(iai_to_carla_mapping,response,world)
@@ -456,8 +410,6 @@ def main():
             
 
     finally:
-
-
 
         print('\ndestroying %d vehicles' % len(vehicles_list))
         client.apply_batch([carla.command.DestroyActor(x) for x in vehicles_list])
@@ -470,6 +422,8 @@ def main():
         client.apply_batch([carla.command.DestroyActor(x) for x in all_id])
 
         time.sleep(0.5)
+
+        client.stop_recorder()
 
 if __name__ == '__main__':
 
