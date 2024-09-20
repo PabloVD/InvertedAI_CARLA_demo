@@ -253,9 +253,20 @@ def main():
     
     iai_seed = args.seed #random.randint(1,10000)
 
+    vehicle_blueprints = get_vehicle_blueprint_list(world)
+    blueprint = vehicle_blueprints[0]
+    blueprint.set_attribute('role_name', 'hero')
+    agent_transform = world.get_map().get_spawn_points()[0]
+    ego_vehicle = world.try_spawn_actor(vehicle_blueprints[0],agent_transform)
+    control = carla.VehicleControl(throttle=1.)
+    ego_vehicle.apply_control(control)
+    ego_state, ego_properties = initialize_iai_agent(ego_vehicle, "car")
+
     #iai
     response, location_info_response = initialize_simulation(args, world)
     agent_properties = response.agent_properties
+    response.agent_properties.append(ego_state)
+    response.agent_properties.append(ego_properties)
     
 
     # vehicle_blueprints = get_blueprint_dictionary(world, client)
@@ -404,6 +415,11 @@ def main():
             )
 
             carla_tick(iai_to_carla_mapping,response,world)
+
+            ego_state, ego_properties = initialize_iai_agent(ego_vehicle, "car")
+
+            response.agent_states[-1] = ego_state
+            agent_properties[-1] = ego_properties
 
             set_spectator(world, hero_v)
 

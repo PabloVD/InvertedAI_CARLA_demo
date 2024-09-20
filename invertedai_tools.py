@@ -1,5 +1,5 @@
 import invertedai as iai
-from invertedai.common import AgentAttributes, AgentState, StaticMapActor, TrafficLightState
+from invertedai.common import AgentProperties, AgentState, StaticMapActor, TrafficLightState
 import carla
 
 import argparse
@@ -25,7 +25,39 @@ def initialize_tl_states(world):
     iai_tl_states = assign_iai_traffic_lights_from_carla(world, iai_tl_states)
     return iai_tl_states
 
+# Initialize IAI agents from CARLA actors
+def initialize_iai_agent(actor, agent_type):
 
+    transf = actor.get_transform()
+    vel = actor.get_velocity()
+    speed = math.sqrt(vel.x**2. + vel.y**2. +vel.z**2.)
+
+    agent_state = AgentState.fromlist([
+                                        transf.location.x,
+                                        transf.location.y,
+                                        transf.rotation.yaw,
+                                        speed
+                                    ])
+
+    bb = actor.bounding_box
+    length, width = bb.extent.x*2, bb.extent.y*2
+
+    agent_properties = AgentProperties(length=length, width=width, agent_type=agent_type)
+    if agent_type=="car":
+        agent_properties.rear_axis_offset = 0.
+
+    return agent_state, agent_properties
+
+# Initialize IAI pedestrians from CARLA actors
+def initialize_pedestrians(pedestrians):
+
+    iai_pedestrians_states, iai_pedestrians_properties = [], []
+    for actor in pedestrians:
+        iai_ped_state, iai_ped_properties = initialize_iai_agent(actor,agent_type="pedestrian")
+        iai_pedestrians_states.append(iai_ped_state)
+        iai_pedestrians_properties.append(iai_ped_properties)
+
+    return iai_pedestrians_states, iai_pedestrians_properties
 
 def setup_carla_environment(args):
     step_length = 0.1 #0.1 is the only step length that is supported at this time
@@ -161,7 +193,7 @@ def assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_propert
         blueprint = random.choice(vehicle_blueprints)
         agent_transform = transform_iai_to_carla(state)
 
-        if agent_id==0: blueprint.set_attribute('role_name', 'hero')
+        # if agent_id==0: blueprint.set_attribute('role_name', 'hero')
 
         actor = world.try_spawn_actor(blueprint,agent_transform)
         
