@@ -254,7 +254,7 @@ def main():
     iai_seed = args.seed #random.randint(1,10000)
 
     #iai
-    response, location_info_response = initialize_simulation(args)
+    response, location_info_response = initialize_simulation(args, world)
     agent_properties = response.agent_properties
     
 

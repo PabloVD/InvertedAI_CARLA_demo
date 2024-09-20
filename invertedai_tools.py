@@ -1,5 +1,5 @@
 import invertedai as iai
-from invertedai.common import AgentAttributes, AgentState, StaticMapActor
+from invertedai.common import AgentAttributes, AgentState, StaticMapActor, TrafficLightState
 import carla
 
 import argparse
@@ -8,10 +8,24 @@ import matplotlib.pyplot as plt
 import time
 import random
 import math
+import json
 
 iai.add_apikey('')  # specify your key here or through the IAI_API_KEY variable
 
-z_offset = 0.15
+z_offset = 0.05
+
+with open('carla2iai.json') as file:
+    carla2iai = json.load(file)
+
+def initialize_tl_states(world):
+    iai_tl_states = {}
+    for tl in carla2iai.values():
+        iai_tl_states[tl] = TrafficLightState.red # Initialize to given value
+
+    iai_tl_states = assign_iai_traffic_lights_from_carla(world, iai_tl_states)
+    return iai_tl_states
+
+
 
 def setup_carla_environment(args):
     step_length = 0.1 #0.1 is the only step length that is supported at this time
@@ -51,7 +65,7 @@ def get_vehicle_blueprint_list(world):
             "vehicle.nissan.patrol_2021",
             "vehicle.seat.leon",
             "vehicle.toyota.prius",
-            "vehicle.volkswagen.t2_2021",
+            # "vehicle.volkswagen.t2_2021",
             # "vehicle.tesla.cybertruck",
             "vehicle.tesla.model3",
             "vehicle.mini.cooper_s"
@@ -174,6 +188,21 @@ def assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_propert
 
     return iai_to_carla_mapping, agent_properties_new, agent_states_new, recurrent_states_new
 
+def get_traffic_light_state_from_carla(carla_tl_state):
+    # Returns carla traffic light state based on iai traffic light state.
+
+    if carla_tl_state == carla.TrafficLightState.Red:
+        return TrafficLightState.red
+
+    elif carla_tl_state == carla.TrafficLightState.Yellow:
+        return TrafficLightState.yellow
+
+    elif carla_tl_state == carla.TrafficLightState.Green:
+        return TrafficLightState.green
+
+    else:  # Unknown state, turn off traffic light
+        return TrafficLightState.Off
+
 def get_traffic_light_state_from_iai(iai_tl_state,carla_tl_state):
     # Returns carla traffic light state based on iai traffic light state.
 
@@ -202,13 +231,29 @@ def get_carla_traffic_lights(world):
 
     return carla_lights
 
-def set_traffic_lights(traffic_lights_states,carla_lights):
+# def set_traffic_lights_from_iai(traffic_lights_states,carla_lights):
+#     # Assume carla_lights is a dictionary containing ID's of traffic light actors mapped to Carla traffic light agents
+#     # This function is only a suggestion about how to set traffic lights
+#     for tl_id, state in traffic_lights_states.items():
+#         carla_tl_id = get_carla_tl_id(tl_id)
+#         carla_lights[carla_tl_id].set_light(get_traffic_light_state_from_iai(state))
+
+def set_traffic_lights_from_carla(iai_tl,carla_tl):
     # Assume carla_lights is a dictionary containing ID's of traffic light actors mapped to Carla traffic light agents
-    # This function is only a suggestion about how to set traffic lights
-    for tl_id, state in traffic_lights_states.items():
-        # carla_tl_id = get_carla_tl_id(tl_id)
-        carla_tl_id = tl_id
-        carla_lights[carla_tl_id].set_light(get_traffic_light_state_from_iai(state))
+    for carla_tl_id, carla_state in carla_tl.items():
+        iai_tl_id = carla2iai[carla_tl_id]
+        iai_tl[iai_tl_id] = get_traffic_light_state_from_carla(carla_state)
+    return iai_tl
+
+def assign_iai_traffic_lights_from_carla(world,iai_tl):
+
+    traffic_lights = world.get_actors().filter('traffic.traffic_light*')
+    
+    carla_tl_dict = {}
+    for tl in traffic_lights:
+        carla_tl_dict[str(tl.id)]=tl.state
+
+    return set_traffic_lights_from_carla(iai_tl,carla_tl_dict)
 
 def carla_tick(iai_to_carla_mapping,response,world):
     """
@@ -226,7 +271,10 @@ def carla_tick(iai_to_carla_mapping,response,world):
 
     world.tick()
 
-def initialize_simulation(args):
+def initialize_simulation(args, world):
+
+    iai_seed = args.seed if args.seed is not None else random.randint(1,10000)
+    traffic_lights_states = initialize_tl_states(world)
 
     #################################################################################################
     # Initialize IAI Agents
@@ -249,13 +297,18 @@ def initialize_simulation(args):
     response = iai.large_initialize(
         location = args.location,
         regions = regions,
-        random_seed = random.randint(1,10000)
+        traffic_light_state_history = [traffic_lights_states],
+        random_seed = iai_seed
     )
+
+    # print(location_info_response)
 
     return response, location_info_response
 
 
 def main(args):
+
+    iai_seed = args.seed if args.seed is not None else random.randint(1,10000)
     
     response, location_info_response = initialize_simulation(args)
     agent_properties = response.agent_properties
@@ -269,9 +322,14 @@ def main(args):
     client, world = setup_carla_environment(args)
 
     #vehicle_blueprints = get_vehicle_blueprint_list(world)
-    vehicle_blueprints = get_blueprint_dictionary(world, client)
-    
+    # vehicle_blueprints = get_blueprint_dictionary(world, client)
+    vehicle_blueprints = get_vehicle_blueprint_list(world)
 
+    for blueprint in vehicle_blueprints:
+        if blueprint.has_attribute('color'):
+            color = random.choice(blueprint.get_attribute('color').recommended_values)
+            blueprint.set_attribute('color', color)
+        
 
     iai_to_carla_mapping, agent_properties, agent_states_new, recurrent_states_new = assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_properties,response.agent_states,response.recurrent_states)
     response.agent_states = agent_states_new
@@ -324,7 +382,7 @@ def main(args):
             light_recurrent_states = response.light_recurrent_states,
             single_call_agent_limit = args.capacity,
             async_api_calls = args.is_async,
-            random_seed = random.randint(1,10000)
+            random_seed = iai_seed
         )
 
         carla_tick(iai_to_carla_mapping,response,world)
