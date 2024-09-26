@@ -14,13 +14,14 @@ iai.add_apikey('')  # specify your key here or through the IAI_API_KEY variable
 
 z_offset = 0.05
 
-with open('carla2iai.json') as file:
+with open('carla2iai_ue5.json') as file:
     carla2iai = json.load(file)
 
 def initialize_tl_states(world):
     iai_tl_states = {}
-    for tl in carla2iai.values():
-        iai_tl_states[tl] = TrafficLightState.red # Initialize to given value
+    for tlpair in carla2iai.values():
+        for tl in tlpair:
+            iai_tl_states[tl] = TrafficLightState.red # Initialize to given value
 
     iai_tl_states = assign_iai_traffic_lights_from_carla(world, iai_tl_states)
     return iai_tl_states
@@ -44,7 +45,7 @@ def initialize_iai_agent(actor, agent_type):
 
     agent_properties = AgentProperties(length=length, width=width, agent_type=agent_type)
     if agent_type=="car":
-        agent_properties.rear_axis_offset = 0.
+        agent_properties.rear_axis_offset = length*0.38 # Empirical value fitted from InvertedAI initialization
 
     return agent_state, agent_properties
 
@@ -66,7 +67,8 @@ def setup_carla_environment(args):
     client.set_timeout(20.0)
 
     # Configure the simulation environment
-    world = client.load_world(args.location.split(":")[-1])
+    #world = client.load_world(args.location.split(":")[-1])
+    world = client.get_world()
     world_settings = carla.WorldSettings(
         synchronous_mode=True,
         fixed_delta_seconds=step_length,
@@ -78,31 +80,38 @@ def setup_carla_environment(args):
 def get_vehicle_blueprint_list(world):
     # A method that returns a list of Carla vehicle blueprints based on any desireable criteria such as vehicle class, size, etc.
 
+    # print(bp for bp in world.get_blueprint_library())
+
     # REPLACE THIS LIST WITH A LIST OF DESIRED VEHICLE BLUEPRINTS
-    blueprint_list = [
-        world.get_blueprint_library().find(bp_str) for bp_str in [
-            "vehicle.audi.a2",
-            "vehicle.audi.etron",
-            "vehicle.audi.tt",
-            "vehicle.bmw.grandtourer",
-            "vehicle.citroen.c3",
-            "vehicle.chevrolet.impala",
-            "vehicle.dodge.charger_2020",
-            "vehicle.ford.mustang",
-            "vehicle.ford.crown",
-            "vehicle.jeep.wrangler_rubicon",
-            "vehicle.lincoln.mkz_2020",
-            "vehicle.mercedes.coupe_2020",
-            "vehicle.nissan.micra",
-            "vehicle.nissan.patrol_2021",
-            "vehicle.seat.leon",
-            "vehicle.toyota.prius",
-            # "vehicle.volkswagen.t2_2021",
-            # "vehicle.tesla.cybertruck",
-            "vehicle.tesla.model3",
-            "vehicle.mini.cooper_s"
-        ]
-    ]
+    # blueprint_list = [
+    #     world.get_blueprint_library().filter(bp_str) for bp_str in [
+    #         "vehicle.audi.a2",
+    #         "vehicle.audi.etron",
+    #         "vehicle.audi.tt",
+    #         "vehicle.bmw.grandtourer",
+    #         "vehicle.citroen.c3",
+    #         "vehicle.chevrolet.impala",
+    #         "vehicle.dodge.charger_2020",
+    #         "vehicle.ford.mustang",
+    #         "vehicle.ford.crown",
+    #         "vehicle.jeep.wrangler_rubicon",
+    #         "vehicle.lincoln.mkz_2020",
+    #         "vehicle.mercedes.coupe_2020",
+    #         "vehicle.nissan.micra",
+    #         "vehicle.nissan.patrol_2021",
+    #         "vehicle.seat.leon",
+    #         "vehicle.toyota.prius",
+    #         # "vehicle.volkswagen.t2_2021",
+    #         # "vehicle.tesla.cybertruck",
+    #         "vehicle.tesla.model3",
+    #         "vehicle.mini.cooper_s"
+    #     ]
+    # ]
+
+    # world.get_blueprint_library().find(bp_str)
+
+    blueprint_list = world.get_blueprint_library().filter("vehicle*")
+    # print(blueprint_list)
 
     return blueprint_list
 
@@ -117,7 +126,6 @@ def get_blueprint_dictionary(world, client):
 
     blueprint_list = []
     for bp_filter in blueprint_filters:
-        print(bp_filter)
         blueprint_list.extend(world.get_blueprint_library().filter(bp_filter))
 
     # blueprint_list = [x for x in blueprint_list if x.get_attribute('base_type') == 'car']
@@ -179,7 +187,7 @@ def match_carla_actor(attributes,bp_dict):
 
     return blueprint_selection
 
-def assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_properties,agent_states,recurrent_states):
+def assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_properties,agent_states,recurrent_states,is_iai,noniai_actors):
     # A method to assign existing IAI agents to a Carla vehicle blueprint and add this agent to the Carla simulation
     # Return a dictionary of IAI agent ID's mapped to references to Carla agents within the Carla environment (e.g. actor ID's)
 
@@ -188,35 +196,57 @@ def assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_propert
     agent_states_new = []
     recurrent_states_new = []
     new_agent_id = 0
+
     for agent_id, (state, attr) in enumerate(zip(agent_states,agent_properties)):
-        #blueprint = match_carla_actor(attr,vehicle_blueprints)
-        blueprint = random.choice(vehicle_blueprints)
-        agent_transform = transform_iai_to_carla(state)
 
-        # if agent_id==0: blueprint.set_attribute('role_name', 'hero')
-
-        actor = world.try_spawn_actor(blueprint,agent_transform)
-        
-        if actor is not None:
-            bb = actor.bounding_box.extent
-
-            agent_attr = agent_properties[agent_id]
-
-            agent_attr.length = 2*bb.x
-            agent_attr.width = 2*bb.y
-            agent_attr.rear_axis_offset = 2*bb.x/3
-
-            iai_to_carla_mapping[new_agent_id] = actor
-            new_agent_id += 1
-
-            agent_properties_new.append(agent_attr)
+        if not is_iai[agent_id]:
+            agent_properties_new.append(agent_properties[agent_id])
             agent_states_new.append(agent_states[agent_id])
             recurrent_states_new.append(recurrent_states[agent_id])
+            actor = noniai_actors[agent_id]
+            iai_to_carla_mapping[new_agent_id] = actor
+            new_agent_id += 1
+            
+            
+        else:
 
-            actor.set_simulate_physics(False)
+            #blueprint = match_carla_actor(attr,vehicle_blueprints)
+            blueprint = random.choice(vehicle_blueprints)
+            agent_transform = transform_iai_to_carla(state)
+
+            print("BP and actor",agent_id,blueprint,agent_transform)
+
+            actor = world.try_spawn_actor(blueprint,agent_transform)
+
+            print(actor)
+            
+            if actor is not None:
+                bb = actor.bounding_box.extent
+
+                agent_attr = agent_properties[agent_id]
+
+                agent_attr.length = 2*bb.x
+                agent_attr.width = 2*bb.y
+                agent_attr.rear_axis_offset = 2*bb.x/3
+
+                iai_to_carla_mapping[new_agent_id] = actor
+                new_agent_id += 1
+
+                agent_properties_new.append(agent_attr)
+                agent_states_new.append(agent_states[agent_id])
+                recurrent_states_new.append(recurrent_states[agent_id])
+
+                # if not is_iai[agent_id]:
+                # print(agent_id, recurrent_states[agent_id])
+
+                actor.set_simulate_physics(False)
+
+        # print(agent_id, actor)
 
     if len(agent_properties_new) == 0:
         raise Exception("No vehicles could be placed in Carla environment.")
+    
+    print("ids",agent_id, new_agent_id)
 
     return iai_to_carla_mapping, agent_properties_new, agent_states_new, recurrent_states_new
 
@@ -273,8 +303,9 @@ def get_carla_traffic_lights(world):
 def set_traffic_lights_from_carla(iai_tl,carla_tl):
     # Assume carla_lights is a dictionary containing ID's of traffic light actors mapped to Carla traffic light agents
     for carla_tl_id, carla_state in carla_tl.items():
-        iai_tl_id = carla2iai[carla_tl_id]
-        iai_tl[iai_tl_id] = get_traffic_light_state_from_carla(carla_state)
+        iai_tl_id_pair = carla2iai[carla_tl_id]
+        for iai_tl_id in iai_tl_id_pair:
+            iai_tl[iai_tl_id] = get_traffic_light_state_from_carla(carla_state)
     return iai_tl
 
 def assign_iai_traffic_lights_from_carla(world,iai_tl):
@@ -287,23 +318,26 @@ def assign_iai_traffic_lights_from_carla(world,iai_tl):
 
     return set_traffic_lights_from_carla(iai_tl,carla_tl_dict)
 
-def carla_tick(iai_to_carla_mapping,response,world):
+def carla_tick(iai_to_carla_mapping,response,world,is_iai):
     """
     Tick the carla simulation forward one time step
     Assume carla_actors is a list of carla actors controlled by IAI
     """
     for agent_id, agent in enumerate(response.agent_states):
-        agent_transform = transform_iai_to_carla(agent)
-
-        actor = iai_to_carla_mapping[agent_id]
-        actor.set_transform(agent_transform)
+        if is_iai[agent_id]:
+            agent_transform = transform_iai_to_carla(agent)
+            try:
+                actor = iai_to_carla_mapping[agent_id]
+                actor.set_transform(agent_transform)
+            except:
+                pass
 
     # carla_lights = get_carla_traffic_lights(world)
     # set_traffic_lights(response.traffic_lights_states,carla_lights)
 
     world.tick()
 
-def initialize_simulation(args, world):
+def initialize_simulation(args, world, agent_states=None, agent_properties=None):
 
     iai_seed = args.seed if args.seed is not None else random.randint(1,10000)
     traffic_lights_states = initialize_tl_states(world)
@@ -330,201 +364,12 @@ def initialize_simulation(args, world):
         location = args.location,
         regions = regions,
         traffic_light_state_history = [traffic_lights_states],
+        agent_states = agent_states,
+        agent_properties = agent_properties,
         random_seed = iai_seed
     )
 
     # print(location_info_response)
 
-    return response, location_info_response
+    return response
 
-
-def main(args):
-
-    iai_seed = args.seed if args.seed is not None else random.randint(1,10000)
-    
-    response, location_info_response = initialize_simulation(args)
-    agent_properties = response.agent_properties
-    map_center = args.map_center
-
-    print(agent_properties)
-
-    #################################################################################################
-    # Setup Carla Environment
-    print(f"Setting up Carla environment.")
-    client, world = setup_carla_environment(args)
-
-    #vehicle_blueprints = get_vehicle_blueprint_list(world)
-    # vehicle_blueprints = get_blueprint_dictionary(world, client)
-    vehicle_blueprints = get_vehicle_blueprint_list(world)
-
-    for blueprint in vehicle_blueprints:
-        if blueprint.has_attribute('color'):
-            color = random.choice(blueprint.get_attribute('color').recommended_values)
-            blueprint.set_attribute('color', color)
-        
-
-    iai_to_carla_mapping, agent_properties, agent_states_new, recurrent_states_new = assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_properties,response.agent_states,response.recurrent_states)
-    response.agent_states = agent_states_new
-    response.recurrent_states = recurrent_states_new
-    carla_tick(iai_to_carla_mapping,response,world)
-
-    #################################################################################################
-    # Run simulation
-    # Call drive over the large area to rollout all agents controlled by IAI forward one timestep then update these agents in Carla.
-
-    print(f"Set up IAI visualization.")
-    # Code for visualization purposes.
-    if args.save_sim_gif:
-        rendered_static_map = location_info_response.birdview_image.decode()
-        scene_plotter = iai.utils.ScenePlotter(
-            rendered_static_map,
-            args.fov,
-            map_center,
-            [StaticMapActor.fromdict({
-                "actor_id":actor.actor_id,
-                "agent_type":actor.agent_type,
-                "x":map_center[0]-actor.center.x,
-                "y":actor.center.y,
-                "orientation":math.pi-actor.orientation,
-                "length":actor.length,
-                "width":actor.width,
-                "dependant":actor.dependant,
-            }) for actor in location_info_response.static_actors],
-            resolution=(2048,2048),
-            dpi=300
-        )
-        scene_plotter.initialize_recording(
-            agent_states=[AgentState.fromlist([
-                map_center[0]-state.center.x,
-                state.center.y,
-                math.pi-state.orientation,
-                state.speed
-            ]) for state in response.agent_states],
-            agent_properties=response.agent_properties,
-            traffic_light_states=response.traffic_lights_states
-        )
-
-    print(f"Begin stepping through simulation.")
-    for _ in tqdm(range(args.sim_length)):
-        response = iai.large_drive(
-            location = args.location,
-            agent_states = response.agent_states,
-            agent_properties = agent_properties,
-            recurrent_states = response.recurrent_states,
-            light_recurrent_states = response.light_recurrent_states,
-            single_call_agent_limit = args.capacity,
-            async_api_calls = args.is_async,
-            random_seed = iai_seed
-        )
-
-        carla_tick(iai_to_carla_mapping,response,world)
-
-        if args.save_sim_gif: scene_plotter.record_step(
-            [AgentState.fromlist([
-                map_center[0]-state.center.x,
-                state.center.y,
-                math.pi-state.orientation,
-                state.speed
-            ]) for state in response.agent_states],
-            response.traffic_lights_states
-        )
-
-    if args.save_sim_gif:
-        print("Simulation finished, save visualization.")
-        # save the visualization to disk
-        fig, ax = plt.subplots(constrained_layout=True, figsize=(50, 50))
-        plt.axis('off')
-        current_time = int(time.time())
-        gif_name = f'carla_demo_example_{current_time}_location-{args.location.split(":")[-1]}_density-{args.num_agents}_center-x{map_center[0]}y{map_center[1]}_width-{args.width}_height-{args.height}.gif'
-        scene_plotter.animate_scene(
-            output_name=gif_name,
-            ax=ax,
-            direction_vec=False,
-            velocity_vec=False,
-            plot_frame_number=True,
-        )
-    print("Done")
-
-
-if __name__ == '__main__':
-    argparser = argparse.ArgumentParser(description=__doc__)
-    argparser.add_argument(
-        '--host',
-        metavar='H',
-        default='127.0.0.1',
-        help='IP of the host server (default: 127.0.0.1)'
-    )
-    argparser.add_argument(
-        '-p',
-        '--port',
-        metavar='P',
-        default=2000,
-        type=int,
-        help='TCP port to listen to (default: 2000)'
-    )
-    argparser.add_argument(
-        '-N',
-        '--num-agents',
-        metavar='D',
-        default=1,
-        type=int,
-        help='Number of vehicles to spawn in defined area in the map (default: 1)'
-    )
-    argparser.add_argument(
-        '--sim-length',
-        type=int,
-        help="Length of the simulation in timesteps (default: 100)",
-        default=100
-    )
-    argparser.add_argument(
-        '--location',
-        type=str,
-        help=f"IAI formatted map on which to create simulate.",
-        default='None'
-    )
-    argparser.add_argument(
-        '--capacity',
-        type=int,
-        help=f"The capacity parameter of a quadtree leaf before splitting.",
-        default=100
-    )
-    argparser.add_argument(
-        '--fov',
-        type=int,
-        help=f"Field of view for visualization.",
-        default=100
-    )
-    argparser.add_argument(
-        '--width',
-        type=int,
-        help=f"Full width of the area to initialize.",
-        default=100
-    )
-    argparser.add_argument(
-        '--height',
-        type=int,
-        help=f"Full height of the area to initialize",
-        default=100
-    )
-    argparser.add_argument(
-        '--map-center',
-        type=int,
-        nargs='+',
-        help=f"Center of the area to initialize",
-        default=tuple([0,0])
-    )
-    argparser.add_argument(
-        '--is-async',
-        type=bool,
-        help=f"Whether to call drive asynchronously.",
-        default=True
-    )
-    argparser.add_argument(
-        '--save-sim-gif',
-        type=bool,
-        help=f"Should the simulation be saved with visualization tool.",
-        default=True
-    )
-    args = argparser.parse_args()
-
-    main(args)
