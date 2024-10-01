@@ -250,7 +250,7 @@ def set_spectator(world, hero_v):
 def main():
 
     ############### CHANGES HERE ###############
-    duration = 50       # s
+    duration = 120       # s
     num_pedestrians = 0   # 20
     
     ego_location = carla.Location( -45, 103, 0)
@@ -278,9 +278,12 @@ def main():
     tl_lights = [tl.id for tl in list(world.get_actors().filter('traffic.traffic_light*'))]
     print(tl_lights)
 
-    # logfile = os.getcwd()+"/logs/record.log"
-    # client.start_recorder(logfile)
-    # print("Recording on file: %s" % logfile)
+    logfolder = os.getcwd()+"/logs/"
+    if not os.path.exists(logfolder):
+        os.system("mkdir "+logfolder)
+    logfile = logfolder+"record.log"
+    client.start_recorder(logfile)
+    print("Recording on file: %s" % logfile)
 
     random.seed(args.seed if args.seed is not None else int(time.time()))
 
@@ -485,7 +488,7 @@ def main():
 
         time.sleep(0.5)
 
-        # client.stop_recorder()
+        client.stop_recorder()
 
 if __name__ == '__main__':
 
