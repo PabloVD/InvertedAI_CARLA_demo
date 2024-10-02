@@ -118,6 +118,10 @@ def argument_parser():
         action='store_true',
         default=False,
         help='Activate no rendering mode')
+    argparser.add_argument(
+        '--safe',
+        action='store_true',
+        help='Avoid spawning vehicles prone to accidents')
     
     argparser.add_argument(
         '-N',
@@ -294,6 +298,8 @@ def main():
     iai_seed = args.seed #random.randint(1,10000)
 
     vehicle_blueprints = world.get_blueprint_library().filter("vehicle*")
+    if args.safe:
+        vehicle_blueprints = [x for x in vehicle_blueprints if x.get_attribute('base_type') == 'car']   
 
     agent_states, agent_properties = [], []
     is_iai = []
@@ -316,8 +322,11 @@ def main():
         agent_states.append(ego_state)
         agent_properties.append(ego_properties)
         ego_vehicle.set_simulate_physics(False)
+        ego_vehicle.set_autopilot(True)
         is_iai.append(False)
         noniai_actors.append(ego_vehicle)
+        traffic_manager = client.get_trafficmanager()
+        traffic_manager.set_synchronous_mode(True)
         
     # Add pedestrians
     if num_pedestrians>0:

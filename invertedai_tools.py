@@ -12,7 +12,7 @@ import json
 
 iai.add_apikey('')  # specify your key here or through the IAI_API_KEY variable
 
-z_offset = 0.05
+z_offset = 0.#05
 
 with open('carla2iai_ue5.json') as file:
     carla2iai = json.load(file)

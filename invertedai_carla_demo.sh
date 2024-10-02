@@ -8,4 +8,5 @@ python3 invertedai_carla_demo.py \
 	--map-center 0 30 \
 	--sim-length 250  \
 	--generationv All \
+	--safe \
 	--seed 2
