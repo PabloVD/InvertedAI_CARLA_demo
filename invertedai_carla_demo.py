@@ -6,22 +6,14 @@
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
 
-"""Example script to generate traffic in the simulation"""
+"""Example script to generate realistic traffic with the InvertedAI API"""
 
-import glob
 import os
-import sys
 import time
 import math
-
 import carla
-
-from carla import VehicleLightState as vls
-
 import argparse
-import logging
 from numpy import random
-
 from invertedai_tools import *
 
 
@@ -41,17 +33,23 @@ def argument_parser():
         type=int,
         help='TCP port to listen to (default: 2000)')
     argparser.add_argument(
+        '--tm-port',
+        metavar='P',
+        default=8000,
+        type=int,
+        help='Port to communicate with TM (default: 8000)')
+    argparser.add_argument(
         '-n', '--number-of-vehicles',
         metavar='N',
-        default=30,
+        default=20,
         type=int,
-        help='Number of vehicles (default: 30)')
+        help='Number of vehicles spawned by InvertedAI (default: 20)')
     argparser.add_argument(
         '-w', '--number-of-walkers',
         metavar='W',
-        default=10,
+        default=0,
         type=int,
-        help='Number of walkers (default: 10)')
+        help='Number of walkers (default: 0)')
     argparser.add_argument(
         '--safe',
         action='store_true',
@@ -65,7 +63,7 @@ def argument_parser():
         '--generationv',
         metavar='G',
         default='3',
-        help='restrict to certain vehicle generation (values: "1","2","All" - default: "All")')
+        help='restrict to certain vehicle generation (values: "2","3","All" - default: "3")')
     argparser.add_argument(
         '--filterw',
         metavar='PATTERN',
@@ -74,74 +72,42 @@ def argument_parser():
     argparser.add_argument(
         '--generationw',
         metavar='G',
-        default='2',
-        help='restrict to certain pedestrian generation (values: "1","2","All" - default: "2")')
-    argparser.add_argument(
-        '--tm-port',
-        metavar='P',
-        default=8000,
-        type=int,
-        help='Port to communicate with TM (default: 8000)')
-    
-    argparser.add_argument(
-        '--hybrid',
-        action='store_true',
-        help='Activate hybrid mode for Traffic Manager')
+        default='3',
+        help='restrict to certain pedestrian generation (values: "2","3","All" - default: "3")')
     argparser.add_argument(
         '-s', '--seed',
         metavar='S',
         type=int,
         help='Set random device seed and deterministic mode for Traffic Manager')
     argparser.add_argument(
-        '--seedw',
-        metavar='S',
-        default=0,
-        type=int,
-        help='Set the seed for pedestrians module')
-    argparser.add_argument(
-        '--car-lights-on',
-        action='store_true',
-        default=False,
-        help='Enable automatic car light management')
-    argparser.add_argument(
         '--hero',
         action='store_true',
         default=False,
         help='Set one of the vehicles as hero')
     argparser.add_argument(
-        '--respawn',
+        '--non-iai-ego',
         action='store_true',
-        default=False,
-        help='Automatically respawn dormant vehicles (only in large maps)')
+        help="Spawn an ego vehicle not driven by InvertedAI simulation, but controlled by the standard traffic manager",
+        default=False
+    )
     argparser.add_argument(
-        '--no-rendering',
+        '--record',
         action='store_true',
-        default=False,
-        help='Activate no rendering mode')
-    argparser.add_argument(
-        '--safe',
-        action='store_true',
-        help='Avoid spawning vehicles prone to accidents')
-    
-    argparser.add_argument(
-        '-N',
-        '--num-agents',
-        metavar='D',
-        default=1,
-        type=int,
-        help='Number of vehicles to spawn in defined area in the map (default: 1)'
+        help="Record the simulation using the CARLA recorder",
+        default=False
     )
     argparser.add_argument(
         '--sim-length',
         type=int,
-        help="Length of the simulation in timesteps (default: 100)",
+        default=120,
+        help="Length of the simulation in seconds (default: 120)",
         default=100
     )
     argparser.add_argument(
         '--location',
         type=str,
         help=f"IAI formatted map on which to create simulate.",
-        default='None'
+        default='carla:Town10HD'
     )
     argparser.add_argument(
         '--capacity',
@@ -180,20 +146,14 @@ def argument_parser():
         help=f"Whether to call drive asynchronously.",
         default=True
     )
-    argparser.add_argument(
-        '--save-sim-gif',
-        type=bool,
-        help=f"Should the simulation be saved with visualization tool.",
-        default=True
-    )
 
     args = argparser.parse_args()
 
     return args
 
-def spawn_pedestrians(world, num_pedestrians):
+def spawn_pedestrians(world, num_pedestrians, filterw, generationw):
 
-    bps = world.get_blueprint_library().filter("walker.pedestrian*")
+    bps = get_actor_blueprints(world, filterw, generationw)
     spawn_points = world.get_map().get_spawn_points()
 
     pedestrians = []
@@ -253,27 +213,10 @@ def set_spectator(world, hero_v):
 
 def main():
 
-    ############### CHANGES HERE ###############
-    duration = 120       # s
-    num_pedestrians = 0   # 20
-    
-    ego_location = carla.Location( -45, 103, 0)
-
-    
-
-    pedestrian_dist = 50
-    pedestrian_point = 100
-
-    
-    same_dist = 40
-    same_interval = 20
-
-    use_noniai_ego = False#True
-    #############################################
-
     args = argument_parser()
 
-    # logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
+    num_pedestrians = args.w
+    non_iai_ego = args.non_iai_ego
 
     FPS = 10
     
@@ -282,12 +225,13 @@ def main():
     tl_lights = [tl.id for tl in list(world.get_actors().filter('traffic.traffic_light*'))]
     print(tl_lights)
 
-    logfolder = os.getcwd()+"/logs/"
-    if not os.path.exists(logfolder):
-        os.system("mkdir "+logfolder)
-    logfile = logfolder+"record.log"
-    client.start_recorder(logfile)
-    print("Recording on file: %s" % logfile)
+    if args.record:
+        logfolder = os.getcwd()+"/logs/"
+        if not os.path.exists(logfolder):
+            os.system("mkdir "+logfolder)
+        logfile = logfolder+"record4.log"
+        client.start_recorder(logfile)
+        print("Recording on file: %s" % logfile)
 
     random.seed(args.seed if args.seed is not None else int(time.time()))
 
@@ -297,7 +241,7 @@ def main():
     
     iai_seed = args.seed #random.randint(1,10000)
 
-    vehicle_blueprints = world.get_blueprint_library().filter("vehicle*")
+    vehicle_blueprints = get_actor_blueprints(world, args.filterv, args.generationv)
     if args.safe:
         vehicle_blueprints = [x for x in vehicle_blueprints if x.get_attribute('base_type') == 'car']   
 
@@ -306,17 +250,17 @@ def main():
     noniai_actors = []
 
     # Add ego vehicle not driven by InvertedAI
-    if use_noniai_ego:
+    if non_iai_ego:
+        print("Spawning an ego vehicle not driven by InvertedAI simulation, but controlled by the standard traffic manager")
+        traffic_manager = client.get_trafficmanager(args.tm_port)
+        traffic_manager.set_synchronous_mode(True)
         blueprint = random.choice(vehicle_blueprints)
         spawn_points = world.get_map().get_spawn_points()
         blueprint.set_attribute('role_name', 'hero')
         ego_vehicle = None
         while ego_vehicle is None:
             agent_transform = random.choice(spawn_points)
-            # agent_transform.location.z += z_offset
-            print("bp transform",vehicle_blueprints[0],agent_transform)
             ego_vehicle = world.try_spawn_actor(vehicle_blueprints[0],agent_transform)
-            print("Ego vehicle",ego_vehicle)
         
         ego_state, ego_properties = initialize_iai_agent(ego_vehicle, "car")
         agent_states.append(ego_state)
@@ -325,12 +269,11 @@ def main():
         ego_vehicle.set_autopilot(True)
         is_iai.append(False)
         noniai_actors.append(ego_vehicle)
-        traffic_manager = client.get_trafficmanager()
-        traffic_manager.set_synchronous_mode(True)
+        
         
     # Add pedestrians
     if num_pedestrians>0:
-        pedestrians = spawn_pedestrians(world, num_pedestrians)
+        pedestrians = spawn_pedestrians(world, num_pedestrians, args.filterw, args.generationw)
         iai_pedestrians_states, iai_pedestrians_properties = initialize_pedestrians(pedestrians)
         agent_states.extend(iai_pedestrians_states)
         agent_properties.extend(iai_pedestrians_properties)
@@ -371,13 +314,7 @@ def main():
         batch = []
         
         # Get hero vehicle
-        hero_v = None
-        possible_vehicles = world.get_actors().filter('vehicle.*')
-        for vehicle in possible_vehicles:
-            if vehicle.attributes['role_name'] == 'hero':
-                hero_v = vehicle
-                break
-        if use_noniai_ego:
+        if non_iai_ego:
             hero_v = ego_vehicle
         if hero_v is None:
             hero_v = possible_vehicles[0]
@@ -445,10 +382,10 @@ def main():
         #     all_actors[i].go_to_location(world.get_random_location_from_navigation())
         #     all_actors[i].set_max_speed(float(walker_speed[int(i/2)]))
 
-        print('spawned %d vehicles and %d walkers, press Ctrl+C to exit.' % (len(vehicles_list), len(walkers_list)))
+        # print('spawned %d vehicles and %d walkers, press Ctrl+C to exit.' % (len(vehicles_list), len(walkers_list)))
 
         
-        for frame in range(duration * FPS):
+        for frame in range(args.sim_length * FPS):
 
             response.traffic_lights_states = assign_iai_traffic_lights_from_carla(world,response.traffic_lights_states)
 
@@ -485,6 +422,7 @@ def main():
 
     finally:
 
+        vehicles_list = world.get_actors().filter('vehicle.*')
         print('\ndestroying %d vehicles' % len(vehicles_list))
         client.apply_batch([carla.command.DestroyActor(x) for x in vehicles_list])
 
@@ -492,12 +430,14 @@ def main():
         for i in range(0, len(all_id), 2):
             all_actors[i].stop()
 
+        walkers_list = world.get_actors().filter('walker.*')
         print('\ndestroying %d walkers' % len(walkers_list))
         client.apply_batch([carla.command.DestroyActor(x) for x in all_id])
 
         time.sleep(0.5)
 
-        client.stop_recorder()
+        if args.record:
+            client.stop_recorder()
 
 if __name__ == '__main__':
 

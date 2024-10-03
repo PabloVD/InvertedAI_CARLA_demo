@@ -124,11 +124,7 @@ def assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_propert
             blueprint = random.choice(vehicle_blueprints)
             agent_transform = transform_iai_to_carla(state)
 
-            print("BP and actor",agent_id,blueprint,agent_transform)
-
             actor = world.try_spawn_actor(blueprint,agent_transform)
-
-            print(actor)
             
             if actor is not None:
                 bb = actor.bounding_box.extent
@@ -221,7 +217,7 @@ def initialize_simulation(args, world, agent_states=None, agent_properties=None)
     # Acquire a grid of 100x100m regions in which to initialize vehicles to be controlled by IAI.
     regions = iai.get_regions_default(
         location = args.location,
-        total_num_agents = args.num_agents,
+        total_num_agents = args.number_of_vehicles,
         area_shape = (int(args.width/2),int(args.height/2)),
         map_center = map_center, 
     )
