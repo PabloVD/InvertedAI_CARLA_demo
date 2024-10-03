@@ -1,18 +1,9 @@
 import invertedai as iai
-from invertedai.common import AgentProperties, AgentState, StaticMapActor, TrafficLightState
+from invertedai.common import AgentProperties, AgentState, TrafficLightState
 import carla
-
-import argparse
-from tqdm import tqdm
-import matplotlib.pyplot as plt
-import time
 import random
 import math
 import json
-
-iai.add_apikey('')  # specify your key here or through the IAI_API_KEY variable
-
-z_offset = 0.#05
 
 with open('carla2iai_ue5.json') as file:
     carla2iai = json.load(file)
@@ -73,7 +64,7 @@ def transform_iai_to_carla(agent_state):
         carla.Location(
             agent_state.center.x,
             agent_state.center.y,
-            z_offset
+            0.
         ),
         carla.Rotation(
             yaw=math.degrees(agent_state.orientation)

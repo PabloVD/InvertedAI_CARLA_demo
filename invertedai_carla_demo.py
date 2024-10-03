@@ -91,6 +91,11 @@ def argument_parser():
         default=False
     )
     argparser.add_argument(
+        '--iai-key',
+        type=str,
+        help="InvertedAI API key."
+    )
+    argparser.add_argument(
         '--record',
         action='store_true',
         help="Record the simulation using the CARLA recorder",
@@ -214,6 +219,9 @@ def set_spectator(world, hero_v):
 def main():
 
     args = argument_parser()
+
+    # Specify your key here or through the IAI_API_KEY variable
+    iai.add_apikey(args.iai_key)  
 
     num_pedestrians = args.w
     non_iai_ego = args.non_iai_ego
