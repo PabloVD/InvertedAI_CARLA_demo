@@ -105,7 +105,6 @@ def argument_parser():
         type=int,
         default=120,
         help="Length of the simulation in seconds (default: 120)",
-        default=100
     )
     argparser.add_argument(
         '--location',
@@ -155,9 +154,7 @@ def argument_parser():
 
     return args
 
-def spawn_pedestrians(world, num_pedestrians, filterw, generationw):
-
-    bps = get_actor_blueprints(world, filterw, generationw)
+def spawn_pedestrians(world, num_pedestrians, bps):
 
     # Get spawn points for pedestrians
     spawn_points = []
@@ -172,6 +169,7 @@ def spawn_pedestrians(world, num_pedestrians, filterw, generationw):
 
     pedestrians = []
 
+    # Spawn pedestrians
     for i in range(len(spawn_points)):
         bp = np.random.choice(bps)
         spawn_point = spawn_points[i]
@@ -179,6 +177,7 @@ def spawn_pedestrians(world, num_pedestrians, filterw, generationw):
         if ped is not None:
             pedestrians.append(ped)
 
+            # Add controller to the pedestrian
             walker_controller_bp = world.get_blueprint_library().find('controller.ai.walker')
             controller = world.spawn_actor(walker_controller_bp, carla.Transform(), ped)
             controller.start()
@@ -238,15 +237,12 @@ def main():
     # Specify your key here or through the IAI_API_KEY variable
     iai.add_apikey(args.iai_key)  
 
-    num_pedestrians = args.w
+    num_pedestrians = args.number_of_walkers
     non_iai_ego = args.non_iai_ego
 
     FPS = 10
     
     client, world = setup_carla_environment(args)
-
-    tl_lights = [tl.id for tl in list(world.get_actors().filter('traffic.traffic_light*'))]
-    print(tl_lights)
 
     if args.record:
         logfolder = os.getcwd()+"/logs/"
@@ -296,7 +292,10 @@ def main():
         
     # Add pedestrians
     if num_pedestrians>0:
-        pedestrians = spawn_pedestrians(world, num_pedestrians, args.filterw, args.generationw)
+        blueprintsWalkers = get_actor_blueprints(world, args.filterw, args.generationw)
+        if not blueprintsWalkers:
+            raise ValueError("Couldn't find any walkers with the specified filters")
+        pedestrians = spawn_pedestrians(world, num_pedestrians, blueprintsWalkers)
         iai_pedestrians_states, iai_pedestrians_properties = initialize_pedestrians(pedestrians)
         agent_states.extend(iai_pedestrians_states)
         agent_properties.extend(iai_pedestrians_properties)
@@ -307,13 +306,13 @@ def main():
 
 
     # Initialize InvertedAI co-simulation
-    response = initialize_simulation(args, world, agent_states=agent_states, agent_properties=agent_properties)
+    response, carla2iai_tl = initialize_simulation(args, world, agent_states=agent_states, agent_properties=agent_properties)
     agent_properties = response.agent_properties
     is_iai.extend( [True]*(len(agent_properties)-num_noniai) )
 
     # Map IAI agents to CARLA actors and update response properties and states
     iai_to_carla_mapping, agent_properties, agent_states_new, recurrent_states_new = assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_properties,response.agent_states,response.recurrent_states,is_iai,noniai_actors)
-    traffic_lights_states = assign_iai_traffic_lights_from_carla(world,response.traffic_lights_states)
+    traffic_lights_states = assign_iai_traffic_lights_from_carla(world,response.traffic_lights_states, carla2iai_tl)
     response.agent_states = agent_states_new
     response.recurrent_states = recurrent_states_new
     response.traffic_lights_states = traffic_lights_states
@@ -324,23 +323,20 @@ def main():
 
         # if not blueprints:
         #     raise ValueError("Couldn't find any vehicles with the specified filters")
-        blueprintsWalkers = get_actor_blueprints(world, args.filterw, args.generationw)
-        if not blueprintsWalkers:
-            raise ValueError("Couldn't find any walkers with the specified filters")
+        
 
 
         vehicles = world.get_actors().filter('vehicle.*')
         print("IAI vehicles:",len(agent_properties),"CARLA vehicles",len(vehicles))
 
-        vehicles = world.get_actors().filter('vehicle.*')
-
         batch = []
         
         # Get hero vehicle
+        hero_v = None
         if non_iai_ego:
             hero_v = ego_vehicle
         if hero_v is None:
-            hero_v = possible_vehicles[0]
+            hero_v = vehicles[0]
 
 
         # print('spawned %d vehicles and %d walkers, press Ctrl+C to exit.' % (len(vehicles_list), len(walkers_list)))
@@ -348,7 +344,7 @@ def main():
         
         for frame in range(args.sim_length * FPS):
 
-            response.traffic_lights_states = assign_iai_traffic_lights_from_carla(world,response.traffic_lights_states)
+            response.traffic_lights_states = assign_iai_traffic_lights_from_carla(world, response.traffic_lights_states, carla2iai_tl)
 
             print(frame, len(response.agent_states),len(agent_properties),len(response.recurrent_states))
 
