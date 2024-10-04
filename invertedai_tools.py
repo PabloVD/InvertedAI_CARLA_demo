@@ -109,6 +109,9 @@ def assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_propert
         else:
 
             blueprint = random.choice(vehicle_blueprints)
+            if blueprint.has_attribute('color'):
+                color = random.choice(blueprint.get_attribute('color').recommended_values)
+                blueprint.set_attribute('color', color)
             agent_transform = transform_iai_to_carla(state)
 
             actor = world.try_spawn_actor(blueprint,agent_transform)

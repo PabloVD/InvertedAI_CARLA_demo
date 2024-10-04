@@ -10,11 +10,9 @@
 
 import os
 import time
-import math
 import carla
 import argparse
 from invertedai_tools import *
-import numpy as np
 
 def argument_parser():
 
@@ -159,21 +157,24 @@ def spawn_pedestrians(world, num_pedestrians, bps):
     # Get spawn points for pedestrians
     spawn_points = []
     for i in range(num_pedestrians):
-        spawn_point = carla.Transform()
+        
         loc = world.get_random_location_from_navigation()
-        if (loc != None):
-            spawn_point.location = loc
+        if (loc is not None):
+            spawn_point = carla.Transform(location=loc)
             #Apply Offset in vertical to avoid collision spawning
-            spawn_point.location.z += 2
+            spawn_point.location.z += 1
             spawn_points.append(spawn_point)
 
     pedestrians = []
 
     # Spawn pedestrians
     for i in range(len(spawn_points)):
-        bp = np.random.choice(bps)
+        walker_bp = random.choice(bps)
+        speed = walker_bp.get_attribute('speed').recommended_values[1]
+        if walker_bp.has_attribute('is_invincible'):
+            walker_bp.set_attribute('is_invincible', 'false')
         spawn_point = spawn_points[i]
-        ped = world.try_spawn_actor(bp,spawn_point)
+        ped = world.try_spawn_actor(walker_bp,spawn_point)
         if ped is not None:
             pedestrians.append(ped)
 
@@ -182,7 +183,7 @@ def spawn_pedestrians(world, num_pedestrians, bps):
             controller = world.spawn_actor(walker_controller_bp, carla.Transform(), ped)
             controller.start()
             controller.go_to_location(world.get_random_location_from_navigation())
-            controller.set_max_speed(1 + np.random.randint(0,1))
+            controller.set_max_speed(1 + random.random())
     
     return pedestrians
 
@@ -248,17 +249,15 @@ def main():
         logfolder = os.getcwd()+"/logs/"
         if not os.path.exists(logfolder):
             os.system("mkdir "+logfolder)
-        logfile = logfolder+"record4.log"
+        logfile = logfolder+"record5.log"
         client.start_recorder(logfile)
         print("Recording on file: %s" % logfile)
 
-    np.random.seed(args.seed if args.seed is not None else int(time.time()))
+    seed = args.seed
 
-    vehicles_list = []
-    walkers_list = []
-    all_id = []
+    if seed:
+        random.seed(seed)
     
-    iai_seed = args.seed
 
     vehicle_blueprints = get_actor_blueprints(world, args.filterv, args.generationv)
     if args.safe:
@@ -273,12 +272,12 @@ def main():
         print("Spawning an ego vehicle not driven by InvertedAI simulation, but controlled by the standard traffic manager")
         traffic_manager = client.get_trafficmanager(args.tm_port)
         traffic_manager.set_synchronous_mode(True)
-        blueprint = np.random.choice(vehicle_blueprints)
+        blueprint = random.choice(vehicle_blueprints)
         spawn_points = world.get_map().get_spawn_points()
         blueprint.set_attribute('role_name', 'hero')
         ego_vehicle = None
         while ego_vehicle is None:
-            agent_transform = np.random.choice(spawn_points)
+            agent_transform = random.choice(spawn_points)
             ego_vehicle = world.try_spawn_actor(vehicle_blueprints[0],agent_transform)
         
         ego_state, ego_properties = initialize_iai_agent(ego_vehicle, "car")
@@ -292,6 +291,8 @@ def main():
         
     # Add pedestrians
     if num_pedestrians>0:
+        if seed:
+            world.set_pedestrians_seed(seed)
         blueprintsWalkers = get_actor_blueprints(world, args.filterw, args.generationw)
         if not blueprintsWalkers:
             raise ValueError("Couldn't find any walkers with the specified filters")
@@ -303,6 +304,8 @@ def main():
         noniai_actors.extend(pedestrians)
     
     num_noniai = len(agent_properties)
+
+    print("Is IAI",is_iai)
 
 
     # Initialize InvertedAI co-simulation
@@ -321,15 +324,9 @@ def main():
 
     try:
 
-        # if not blueprints:
-        #     raise ValueError("Couldn't find any vehicles with the specified filters")
-        
-
-
         vehicles = world.get_actors().filter('vehicle.*')
-        print("IAI vehicles:",len(agent_properties),"CARLA vehicles",len(vehicles))
-
-        batch = []
+        print("Total number of agents:",len(agent_properties),"Vehicles",len(vehicles), "Pedestrians:",len(pedestrians))
+        # print('spawned %d vehicles and %d walkers, press Ctrl+C to exit.' % (len(vehicles_list), len(walkers_list)))
         
         # Get hero vehicle
         hero_v = None
@@ -337,11 +334,9 @@ def main():
             hero_v = ego_vehicle
         if hero_v is None:
             hero_v = vehicles[0]
+        # hero_v = world.get_actors().filter('walker.*')[0]
 
 
-        # print('spawned %d vehicles and %d walkers, press Ctrl+C to exit.' % (len(vehicles_list), len(walkers_list)))
-
-        
         for frame in range(args.sim_length * FPS):
 
             response.traffic_lights_states = assign_iai_traffic_lights_from_carla(world, response.traffic_lights_states, carla2iai_tl)
@@ -359,7 +354,7 @@ def main():
                 single_call_agent_limit = args.capacity,
                 async_api_calls = args.is_async,
                 api_model_version = "bI5p",
-                random_seed = iai_seed
+                random_seed = seed
             )
 
             carla_tick(iai_to_carla_mapping,response,world,is_iai)
