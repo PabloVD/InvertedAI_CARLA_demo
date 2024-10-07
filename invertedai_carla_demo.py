@@ -302,16 +302,23 @@ def main():
         agent_properties.extend(iai_pedestrians_properties)
         is_iai.extend( [False]*len(iai_pedestrians_states) )
         noniai_actors.extend(pedestrians)
+    else:
+        pedestrians = []
     
     num_noniai = len(agent_properties)
 
-    print("Is IAI",is_iai)
-
-
     # Initialize InvertedAI co-simulation
-    response, carla2iai_tl = initialize_simulation(args, world, agent_states=agent_states, agent_properties=agent_properties)
+    response, carla2iai_tl, location_info_response = initialize_simulation(args, world, agent_states=agent_states, agent_properties=agent_properties)
     agent_properties = response.agent_properties
     is_iai.extend( [True]*(len(agent_properties)-num_noniai) )
+
+    log_writer = iai.LogWriter()
+    log_writer.initialize(
+        location=args.location,
+        location_info_response=location_info_response,
+        init_response=response
+    )
+    iailog_path = os.path.join(os.getcwd(),f"iailog.json")
 
     # Map IAI agents to CARLA actors and update response properties and states
     iai_to_carla_mapping, agent_properties, agent_states_new, recurrent_states_new = assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_properties,response.agent_states,response.recurrent_states,is_iai,noniai_actors)
@@ -321,6 +328,8 @@ def main():
     response.traffic_lights_states = traffic_lights_states
 
     carla_tick(iai_to_carla_mapping,response,world,is_iai)
+
+    print("Is IAI",is_iai)
 
     try:
 
@@ -357,6 +366,8 @@ def main():
                 random_seed = seed
             )
 
+            log_writer.drive(drive_response=response)
+
             carla_tick(iai_to_carla_mapping,response,world,is_iai)
 
             # Update agents not driven by IAI, like pedestrians
@@ -385,12 +396,14 @@ def main():
 
         walkers_list = world.get_actors().filter('walker.*')
         print('\ndestroying %d walkers' % len(walkers_list))
-        client.apply_batch([carla.command.DestroyActor(x) for x in all_id])
+        client.apply_batch([carla.command.DestroyActor(x) for x in walkers_list])
 
         time.sleep(0.5)
 
         if args.record:
             client.stop_recorder()
+
+        log_writer.export_to_file(log_path=iailog_path)
 
 if __name__ == '__main__':
 

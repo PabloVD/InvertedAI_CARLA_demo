@@ -234,5 +234,5 @@ def initialize_simulation(args, world, agent_states=None, agent_properties=None)
         random_seed = iai_seed
     )
 
-    return response, carla2iai_tl
+    return response, carla2iai_tl, location_info_response
 
