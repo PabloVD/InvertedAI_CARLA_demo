@@ -8,7 +8,7 @@ def setup_carla_environment(args):
     step_length = 0.1 #0.1 is the only step length that is supported at this time
 
     client = carla.Client(args.host, args.port)
-    client.set_timeout(20.0)
+    client.set_timeout(200.0)
 
     # Configure the simulation environment
     #world = client.load_world(args.location.split(":")[-1])

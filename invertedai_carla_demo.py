@@ -13,6 +13,9 @@ import time
 import carla
 import argparse
 from invertedai_tools import *
+import logging
+
+SpawnActor = carla.command.SpawnActor
 
 def argument_parser():
 
@@ -152,7 +155,9 @@ def argument_parser():
 
     return args
 
-def spawn_pedestrians(world, num_pedestrians, bps):
+def spawn_pedestrians(client, world, num_pedestrians, bps):
+
+    batch = []
 
     # Get spawn points for pedestrians
     spawn_points = []
@@ -166,6 +171,7 @@ def spawn_pedestrians(world, num_pedestrians, bps):
             spawn_points.append(spawn_point)
 
     pedestrians = []
+    walkers_list = []
 
     # Spawn pedestrians
     for i in range(len(spawn_points)):
@@ -174,17 +180,30 @@ def spawn_pedestrians(world, num_pedestrians, bps):
         if walker_bp.has_attribute('is_invincible'):
             walker_bp.set_attribute('is_invincible', 'false')
         spawn_point = spawn_points[i]
-        ped = world.try_spawn_actor(walker_bp,spawn_point)
-        if ped is not None:
-            pedestrians.append(ped)
+        batch.append(SpawnActor(walker_bp, spawn_point))
 
-            # Add controller to the pedestrian
-            walker_controller_bp = world.get_blueprint_library().find('controller.ai.walker')
-            controller = world.spawn_actor(walker_controller_bp, carla.Transform(), ped)
-            controller.start()
-            controller.go_to_location(world.get_random_location_from_navigation())
-            controller.set_max_speed(1 + random.random())
-    
+    results = client.apply_batch_sync(batch, True)
+    pedestrians = world.get_actors().filter('walker.*')
+    for i in range(len(results)):
+        if results[i].error:
+            logging.error(results[i].error)
+        else:
+            walkers_list.append({"id": results[i].actor_id})
+
+    batch = []
+    walker_controller_bp = world.get_blueprint_library().find('controller.ai.walker')
+    for i in range(len(walkers_list)):
+        batch.append(SpawnActor(walker_controller_bp, carla.Transform(), walkers_list[i]["id"]))
+    results = client.apply_batch_sync(batch, True)
+
+    world.tick()
+
+    for controller in world.get_actors().filter('controller.ai.walker'):
+        controller.start()
+        dest = world.get_random_location_from_navigation()
+        controller.go_to_location(dest)
+        controller.set_max_speed(1 + random.random())
+
     return pedestrians
 
 def get_actor_blueprints(world, filter, generation):
@@ -249,7 +268,7 @@ def main():
         logfolder = os.getcwd()+"/logs/"
         if not os.path.exists(logfolder):
             os.system("mkdir "+logfolder)
-        logfile = logfolder+"record5.log"
+        logfile = logfolder+"record8.log"
         client.start_recorder(logfile)
         print("Recording on file: %s" % logfile)
 
@@ -258,7 +277,6 @@ def main():
     if seed:
         random.seed(seed)
     
-
     vehicle_blueprints = get_actor_blueprints(world, args.filterv, args.generationv)
     if args.safe:
         vehicle_blueprints = [x for x in vehicle_blueprints if x.get_attribute('base_type') == 'car']   
@@ -296,7 +314,7 @@ def main():
         blueprintsWalkers = get_actor_blueprints(world, args.filterw, args.generationw)
         if not blueprintsWalkers:
             raise ValueError("Couldn't find any walkers with the specified filters")
-        pedestrians = spawn_pedestrians(world, num_pedestrians, blueprintsWalkers)
+        pedestrians = spawn_pedestrians(client, world, num_pedestrians, blueprintsWalkers)
         iai_pedestrians_states, iai_pedestrians_properties = initialize_pedestrians(pedestrians)
         agent_states.extend(iai_pedestrians_states)
         agent_properties.extend(iai_pedestrians_properties)
