@@ -155,6 +155,7 @@ def argument_parser():
 
     return args
 
+# Spawn pedestrians in the simulation
 def spawn_pedestrians(client, world, num_pedestrians, bps):
 
     batch = []
@@ -190,6 +191,7 @@ def spawn_pedestrians(client, world, num_pedestrians, bps):
         else:
             walkers_list.append({"id": results[i].actor_id})
 
+    # Spawn IA controllers for pedestrians
     batch = []
     walker_controller_bp = world.get_blueprint_library().find('controller.ai.walker')
     for i in range(len(walkers_list)):
@@ -206,6 +208,7 @@ def spawn_pedestrians(client, world, num_pedestrians, bps):
 
     return pedestrians
 
+# Get blueprints according to the given filters
 def get_actor_blueprints(world, filter, generation):
     bps = world.get_blueprint_library().filter(filter)
 
@@ -230,7 +233,7 @@ def get_actor_blueprints(world, filter, generation):
         print("   Warning! Actor Generation is not valid. No actor will be spawned.")
         return []
 
-
+# Set spectator view
 def set_spectator(world, hero_v):
 
     spectator_offset_x = -6.
@@ -307,7 +310,7 @@ def main():
         noniai_actors.append(ego_vehicle)
         
         
-    # Add pedestrians
+    # Add pedestrians (not driven by IAI)
     if num_pedestrians>0:
         if seed:
             world.set_pedestrians_seed(seed)
@@ -345,6 +348,22 @@ def main():
     response.recurrent_states = recurrent_states_new
     response.traffic_lights_states = traffic_lights_states
 
+    camdir = "cameraout"
+    if not os.path.exists(camdir+"/"):
+        os.system("mkdir "+camdir+"/")
+
+    # Spawn a fixed camera in a junction
+    cam_loc = carla.Location(x=-82, y=-2, z=23)
+    cam_rot = carla.Rotation(roll=0, pitch=-31, yaw=31)
+    camera_init_trans = carla.Transform(cam_loc, cam_rot)
+    camera_bp = world.get_blueprint_library().find('sensor.camera.rgb')
+    camera_bp.set_attribute('image_size_x', '3840')
+    camera_bp.set_attribute('image_size_y', '2160')
+    camera_bp.set_attribute('fov', '77')
+    camera = world.spawn_actor(camera_bp, camera_init_trans)
+    camera.listen(lambda image: image.save_to_disk(camdir+'/%06d.png' % image.frame))
+
+
     carla_tick(iai_to_carla_mapping,response,world,is_iai)
 
     print("Is IAI",is_iai)
@@ -353,7 +372,6 @@ def main():
 
         vehicles = world.get_actors().filter('vehicle.*')
         print("Total number of agents:",len(agent_properties),"Vehicles",len(vehicles), "Pedestrians:",len(pedestrians))
-        # print('spawned %d vehicles and %d walkers, press Ctrl+C to exit.' % (len(vehicles_list), len(walkers_list)))
         
         # Get hero vehicle
         hero_v = None
@@ -362,7 +380,6 @@ def main():
         if hero_v is None:
             hero_v = vehicles[0]
         # hero_v = world.get_actors().filter('walker.*')[0]
-
 
         for frame in range(args.sim_length * FPS):
 
