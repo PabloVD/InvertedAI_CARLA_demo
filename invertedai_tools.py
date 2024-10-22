@@ -72,16 +72,18 @@ def transform_iai_to_carla(agent_state):
     return agent_transform
 
 # Update transforms of CARLA agents driven by IAI and tick the world
-def carla_tick(iai_to_carla_mapping,response,world,is_iai):
+def carla_tick(iai2carla,response,world):
     """
     Tick the carla simulation forward one time step
     Assume carla_actors is a list of carla actors controlled by IAI
     """
-    for agent_id, agent in enumerate(response.agent_states):
-        if is_iai[agent_id]:
+    for agent_id in iai2carla.keys():
+        agentdict = iai2carla[agent_id]
+        if agentdict["is_iai"]:            
+            agent = response.agent_states[agent_id]
             agent_transform = transform_iai_to_carla(agent)
-            try:
-                actor = iai_to_carla_mapping[agent_id]
+            try:     
+                actor = agentdict["actor"]
                 actor.set_transform(agent_transform)
             except:
                 pass
@@ -91,11 +93,11 @@ def carla_tick(iai_to_carla_mapping,response,world,is_iai):
 # Assign existing IAI agents to CARLA vehicle blueprints and add these agents to the CARLA simulation
 def assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_properties,agent_states,recurrent_states,is_iai,noniai_actors):
 
-    iai_to_carla_mapping = {}
     agent_properties_new = []
     agent_states_new = []
     recurrent_states_new = []
     new_agent_id = 0
+    iai2carla={}
 
     for agent_id, (state, attr) in enumerate(zip(agent_states,agent_properties)):
 
@@ -104,8 +106,8 @@ def assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_propert
             agent_states_new.append(agent_states[agent_id])
             recurrent_states_new.append(recurrent_states[agent_id])
             actor = noniai_actors[agent_id]
-            iai_to_carla_mapping[new_agent_id] = actor
             new_agent_id += 1
+            iai2carla[len(iai2carla)] = {"actor":actor, "is_iai":False, "type":agent_properties[agent_id].agent_type}
              
         else:
 
@@ -126,7 +128,6 @@ def assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_propert
                 agent_attr.width = 2*bb.y
                 agent_attr.rear_axis_offset = 2*bb.x/3
 
-                iai_to_carla_mapping[new_agent_id] = actor
                 new_agent_id += 1
 
                 agent_properties_new.append(agent_attr)
@@ -135,10 +136,12 @@ def assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_propert
 
                 actor.set_simulate_physics(False)
 
+                iai2carla[len(iai2carla)] = {"actor":actor, "is_iai":True, "type":agent_properties[agent_id].agent_type}
+
     if len(agent_properties_new) == 0:
         raise Exception("No vehicles could be placed in Carla environment.")
     
-    return iai_to_carla_mapping, agent_properties_new, agent_states_new, recurrent_states_new
+    return agent_properties_new, agent_states_new, recurrent_states_new, iai2carla
 
 # Mapping between CARLA and IAI traffic lights IDs
 def get_traffic_lights_mapping(world):

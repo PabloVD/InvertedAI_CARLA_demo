@@ -323,6 +323,7 @@ def main():
         agent_properties.extend(iai_pedestrians_properties)
         is_iai.extend( [False]*len(iai_pedestrians_states) )
         noniai_actors.extend(pedestrians)
+    
     else:
         pedestrians = []
     
@@ -342,31 +343,28 @@ def main():
     iailog_path = os.path.join(os.getcwd(),f"iailog.json")
 
     # Map IAI agents to CARLA actors and update response properties and states
-    iai_to_carla_mapping, agent_properties, agent_states_new, recurrent_states_new = assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_properties,response.agent_states,response.recurrent_states,is_iai,noniai_actors)
+    agent_properties, agent_states_new, recurrent_states_new, iai2carla = assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_properties,response.agent_states,response.recurrent_states,is_iai,noniai_actors)
     traffic_lights_states = assign_iai_traffic_lights_from_carla(world,response.traffic_lights_states, carla2iai_tl)
     response.agent_states = agent_states_new
     response.recurrent_states = recurrent_states_new
     response.traffic_lights_states = traffic_lights_states
 
-    camdir = "cameraout"
-    if not os.path.exists(camdir+"/"):
-        os.system("mkdir "+camdir+"/")
+    # camdir = "cameraout"
+    # if not os.path.exists(camdir+"/"):
+    #     os.system("mkdir "+camdir+"/")
 
     # Spawn a fixed camera in a junction
-    cam_loc = carla.Location(x=-82, y=-2, z=23)
-    cam_rot = carla.Rotation(roll=0, pitch=-31, yaw=31)
-    camera_init_trans = carla.Transform(cam_loc, cam_rot)
-    camera_bp = world.get_blueprint_library().find('sensor.camera.rgb')
-    camera_bp.set_attribute('image_size_x', '3840')
-    camera_bp.set_attribute('image_size_y', '2160')
-    camera_bp.set_attribute('fov', '77')
-    camera = world.spawn_actor(camera_bp, camera_init_trans)
-    camera.listen(lambda image: image.save_to_disk(camdir+'/%06d.png' % image.frame))
+    # cam_loc = carla.Location(x=-82, y=-2, z=23)
+    # cam_rot = carla.Rotation(roll=0, pitch=-31, yaw=31)
+    # camera_init_trans = carla.Transform(cam_loc, cam_rot)
+    # camera_bp = world.get_blueprint_library().find('sensor.camera.rgb')
+    # camera_bp.set_attribute('image_size_x', '3840')
+    # camera_bp.set_attribute('image_size_y', '2160')
+    # camera_bp.set_attribute('fov', '77')
+    # camera = world.spawn_actor(camera_bp, camera_init_trans)
+    # camera.listen(lambda image: image.save_to_disk(camdir+'/%06d.png' % image.frame))
 
-
-    carla_tick(iai_to_carla_mapping,response,world,is_iai)
-
-    print("Is IAI",is_iai)
+    carla_tick(iai2carla,response,world)
 
     try:
 
@@ -403,15 +401,29 @@ def main():
 
             log_writer.drive(drive_response=response)
 
-            carla_tick(iai_to_carla_mapping,response,world,is_iai)
+            # Tick CARLA simulation
+            carla_tick(iai2carla,response,world)
 
-            # Update agents not driven by IAI, like pedestrians
-            for agent_id in range(len(agent_properties)):
-                if not is_iai[agent_id]:
-                    actor = iai_to_carla_mapping[agent_id]
-                    state, properties = initialize_iai_agent(actor, "car")
+            # Update agents not driven by IAI in IAI cosimulation, like pedestrians
+            for agent_id in iai2carla.keys():
+                agentdict = iai2carla[agent_id]
+
+                if not agentdict["is_iai"]:
+                    actor = agentdict["actor"]
+                    state, properties = initialize_iai_agent(actor, agentdict["type"])
                     response.agent_states[agent_id] = state
                     agent_properties[agent_id] = properties
+
+            # Include possible new actors (vehicles) from other clients (using automatic_control.py or manual_control.py for instance)
+            actors_all = world.get_actors().filter('vehicle.*')
+            actsids = [act["actor"].id for act in iai2carla.values()]
+            for actor in actors_all:
+                if not (actor.id in actsids):
+                    state, properties = initialize_iai_agent(actor, "car")
+                    response.agent_states.append( state )
+                    agent_properties.append( properties )
+                    response.recurrent_states.append( response.recurrent_states[-1] )   # temporal fix
+                    iai2carla[len(iai2carla)] = {"actor":actor, "is_iai":False, "type":properties.agent_type}
 
             # Update spectator view
             set_spectator(world, hero_v)
