@@ -12,11 +12,15 @@ import os
 import time
 import carla
 import argparse
-from invertedai_tools import *
 import logging
+import math
+import random
+import invertedai as iai
+from invertedai_tools import initialize_simulation, assign_iai_traffic_lights_from_carla, assign_carla_blueprints_to_iai_agents, carla_tick, initialize_iai_agent, initialize_pedestrians
 
 SpawnActor = carla.command.SpawnActor
 
+# Argument parser
 def argument_parser():
 
     argparser = argparse.ArgumentParser(
@@ -177,7 +181,6 @@ def spawn_pedestrians(client, world, num_pedestrians, bps):
     # Spawn pedestrians
     for i in range(len(spawn_points)):
         walker_bp = random.choice(bps)
-        speed = walker_bp.get_attribute('speed').recommended_values[1]
         if walker_bp.has_attribute('is_invincible'):
             walker_bp.set_attribute('is_invincible', 'false')
         spawn_point = spawn_points[i]
@@ -252,7 +255,25 @@ def set_spectator(world, hero_v):
     spectator_t.rotation.pitch -= spectator_offset_pitch
     world.get_spectator().set_transform(spectator_t)
 
+# Setup CARLA client and world
+def setup_carla_environment(host, port):
 
+    step_length = 0.1 #0.1 is the only step length that is supported at this time
+
+    client = carla.Client(host, port)
+    client.set_timeout(200.0)
+
+    # Configure the simulation environment
+    world = client.get_world()
+    world_settings = carla.WorldSettings(
+        synchronous_mode=True,
+        fixed_delta_seconds=step_length,
+    )
+    world.apply_settings(world_settings)
+
+    return client, world
+
+# Main
 def main():
 
     args = argument_parser()
@@ -263,9 +284,10 @@ def main():
     num_pedestrians = args.number_of_walkers
     non_iai_ego = args.non_iai_ego
 
-    FPS = 10
-    
-    client, world = setup_carla_environment(args)
+    # Setup CARLA client and world
+    client, world = setup_carla_environment(args.host, args.port)
+
+    FPS = int(1./world.get_settings().fixed_delta_seconds)
 
     if args.record:
         logfolder = os.getcwd()+"/logs/"
