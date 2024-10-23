@@ -154,6 +154,18 @@ def argument_parser():
         help=f"Whether to call drive asynchronously.",
         default=True
     )
+    argparser.add_argument(
+        '--api-model',
+        type=str,
+        help=f"IAI API model version",
+        default="bI5p"
+    )
+    argparser.add_argument(
+        '--iai-log',
+        action="store_true",
+        help=f"Export a log file for the InvertedAI cosimulation, which can be replayed afterwards",
+        default=False
+    )
 
     args = argparser.parse_args()
 
@@ -278,14 +290,17 @@ def main():
 
     args = argument_parser()
 
-    # Specify your key here or through the IAI_API_KEY variable
-    iai.add_apikey(args.iai_key)  
+    # Setup CARLA client and world
+    client, world = setup_carla_environment(args.host, args.port)
+
+    # Specify the IAI API key
+    try:
+        iai.add_apikey(args.iai_key)  
+    except:
+        print("\n\tYou need to indicate the InvertedAI API key. To obtain one, please go to https://www.inverted.ai \n")
 
     num_pedestrians = args.number_of_walkers
     non_iai_ego = args.non_iai_ego
-
-    # Setup CARLA client and world
-    client, world = setup_carla_environment(args.host, args.port)
 
     FPS = int(1./world.get_settings().fixed_delta_seconds)
 
@@ -356,13 +371,15 @@ def main():
     agent_properties = response.agent_properties
     is_iai.extend( [True]*(len(agent_properties)-num_noniai) )
 
-    log_writer = iai.LogWriter()
-    log_writer.initialize(
-        location=args.location,
-        location_info_response=location_info_response,
-        init_response=response
-    )
-    iailog_path = os.path.join(os.getcwd(),f"iailog.json")
+    if args.iai_log:
+
+        log_writer = iai.LogWriter()
+        log_writer.initialize(
+            location=args.location,
+            location_info_response=location_info_response,
+            init_response=response
+        )
+        iailog_path = os.path.join(os.getcwd(),f"iailog.json")
 
     # Map IAI agents to CARLA actors and update response properties and states
     agent_properties, agent_states_new, recurrent_states_new, iai2carla = assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_properties,response.agent_states,response.recurrent_states,is_iai,noniai_actors)
@@ -417,7 +434,7 @@ def main():
                 light_recurrent_states = None,
                 single_call_agent_limit = args.capacity,
                 async_api_calls = args.is_async,
-                api_model_version = "bI5p",
+                api_model_version = args.api_model,
                 random_seed = seed
             )
 
@@ -472,7 +489,8 @@ def main():
         if args.record:
             client.stop_recorder()
 
-        log_writer.export_to_file(log_path=iailog_path)
+        if args.iai_log:
+            log_writer.export_to_file(log_path=iailog_path)
 
 if __name__ == '__main__':
 
