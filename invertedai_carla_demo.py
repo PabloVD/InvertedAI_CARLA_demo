@@ -438,7 +438,8 @@ def main():
                 random_seed = seed
             )
 
-            log_writer.drive(drive_response=response)
+            if args.iai_log:
+                log_writer.drive(drive_response=response)
 
             # Tick CARLA simulation
             carla_tick(iai2carla,response,world)
