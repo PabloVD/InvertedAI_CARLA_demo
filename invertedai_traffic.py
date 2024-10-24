@@ -93,12 +93,6 @@ def argument_parser():
         default=False,
         help='Set one of the vehicles as hero')
     argparser.add_argument(
-        '--non-iai-ego',
-        action='store_true',
-        help="Spawn an ego vehicle not driven by InvertedAI simulation, but controlled by the standard traffic manager",
-        default=False
-    )
-    argparser.add_argument(
         '--iai-key',
         type=str,
         help="InvertedAI API key."
@@ -530,7 +524,6 @@ def main():
         print("\n\tYou need to indicate the InvertedAI API key. To obtain one, please go to https://www.inverted.ai \n")
 
     num_pedestrians = args.number_of_walkers
-    non_iai_ego = args.non_iai_ego
 
     FPS = int(1./world.get_settings().fixed_delta_seconds)
 
@@ -554,28 +547,6 @@ def main():
     agent_states, agent_properties = [], []
     is_iai = []
     noniai_actors = []
-
-    # Add ego vehicle not driven by InvertedAI
-    if non_iai_ego:
-        print("Spawning an ego vehicle not driven by InvertedAI simulation, but controlled by the standard traffic manager")
-        traffic_manager = client.get_trafficmanager(args.tm_port)
-        traffic_manager.set_synchronous_mode(True)
-        blueprint = random.choice(vehicle_blueprints)
-        spawn_points = world.get_map().get_spawn_points()
-        blueprint.set_attribute('role_name', 'hero')
-        ego_vehicle = None
-        while ego_vehicle is None:
-            agent_transform = random.choice(spawn_points)
-            ego_vehicle = world.try_spawn_actor(vehicle_blueprints[0],agent_transform)
-        
-        ego_state, ego_properties = initialize_iai_agent(ego_vehicle, "car")
-        agent_states.append(ego_state)
-        agent_properties.append(ego_properties)
-        ego_vehicle.set_simulate_physics(False)
-        ego_vehicle.set_autopilot(True)
-        is_iai.append(False)
-        noniai_actors.append(ego_vehicle)
-        
         
     # Add pedestrians (not driven by IAI)
     if num_pedestrians>0:
@@ -618,41 +589,21 @@ def main():
     response.recurrent_states = recurrent_states_new
     response.traffic_lights_states = traffic_lights_states
 
-    # camdir = "cameraout"
-    # if not os.path.exists(camdir+"/"):
-    #     os.system("mkdir "+camdir+"/")
-
-    # Spawn a fixed camera in a junction
-    # cam_loc = carla.Location(x=-82, y=-2, z=23)
-    # cam_rot = carla.Rotation(roll=0, pitch=-31, yaw=31)
-    # camera_init_trans = carla.Transform(cam_loc, cam_rot)
-    # camera_bp = world.get_blueprint_library().find('sensor.camera.rgb')
-    # camera_bp.set_attribute('image_size_x', '3840')
-    # camera_bp.set_attribute('image_size_y', '2160')
-    # camera_bp.set_attribute('fov', '77')
-    # camera = world.spawn_actor(camera_bp, camera_init_trans)
-    # camera.listen(lambda image: image.save_to_disk(camdir+'/%06d.png' % image.frame))
-
     carla_tick(iai2carla,response,world)
 
     try:
 
         vehicles = world.get_actors().filter('vehicle.*')
         print("Total number of agents:",len(agent_properties),"Vehicles",len(vehicles), "Pedestrians:",len(pedestrians))
-        
+
         # Get hero vehicle
         hero_v = None
-        if non_iai_ego:
-            hero_v = ego_vehicle
-        if hero_v is None:
+        if args.hero:
             hero_v = vehicles[0]
-        # hero_v = world.get_actors().filter('walker.*')[0]
 
         for frame in range(args.sim_length * FPS):
 
             response.traffic_lights_states = assign_iai_traffic_lights_from_carla(world, response.traffic_lights_states, carla2iai_tl)
-
-            print(frame, len(response.agent_states),len(agent_properties),len(response.recurrent_states))
 
             # IAI update step
             response = iai.large_drive(
@@ -695,8 +646,9 @@ def main():
                     response.recurrent_states.append( response.recurrent_states[-1] )   # temporal fix
                     iai2carla[len(iai2carla)] = {"actor":actor, "is_iai":False, "type":properties.agent_type}
 
-            # Update spectator view
-            set_spectator(world, hero_v)
+            # Update spectator view if there is hero vehicle
+            if hero_v is not None:
+                set_spectator(world, hero_v)
 
             
 
