@@ -308,7 +308,7 @@ def main():
         logfolder = os.getcwd()+"/logs/"
         if not os.path.exists(logfolder):
             os.system("mkdir "+logfolder)
-        logfile = logfolder+"record8.log"
+        logfile = logfolder+"record.log"
         client.start_recorder(logfile)
         print("Recording on file: %s" % logfile)
 

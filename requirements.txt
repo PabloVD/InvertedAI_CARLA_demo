@@ -1,2 +1,1 @@
-requests
-invertedai
+invertedai@git+https://github.com/inverted-ai/invertedai.git@develop
