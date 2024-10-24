@@ -344,7 +344,7 @@ def transform_iai_to_carla(agent_state):
     return agent_transform
 
 # Update transforms of CARLA agents driven by IAI and tick the world
-def carla_tick(iai2carla,response,world):
+def update_transforms(iai2carla,response):
     """
     Tick the carla simulation forward one time step
     Assume carla_actors is a list of carla actors controlled by IAI
@@ -359,8 +359,6 @@ def carla_tick(iai2carla,response,world):
                 actor.set_transform(agent_transform)
             except:
                 pass
-
-    world.tick()
 
 # Assign existing IAI agents to CARLA vehicle blueprints and add these agents to the CARLA simulation
 def assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_properties,agent_states,recurrent_states,is_iai,noniai_actors):
@@ -574,6 +572,8 @@ def main():
     agent_properties = response.agent_properties
     is_iai.extend( [True]*(len(agent_properties)-num_noniai) )
 
+    # Write InvertedAI log file, which can be opened afterwards to visualize a gif and further analysis
+    # See an example of usage here: https://github.com/inverted-ai/invertedai/blob/master/examples/scenario_log_example.py
     if args.iai_log:
 
         log_writer = iai.LogWriter()
@@ -591,7 +591,8 @@ def main():
     response.recurrent_states = recurrent_states_new
     response.traffic_lights_states = traffic_lights_states
 
-    carla_tick(iai2carla,response,world)
+    # Perform first CARLA simulation tick
+    world.tick()
 
     try:
 
@@ -624,8 +625,11 @@ def main():
             if args.iai_log:
                 log_writer.drive(drive_response=response)
 
+            # Update CARLA actors with new transforms from IAI agents
+            update_transforms(iai2carla,response)
+
             # Tick CARLA simulation
-            carla_tick(iai2carla,response,world)
+            world.tick()
 
             # Update agents not driven by IAI in IAI cosimulation, like pedestrians
             for agent_id in iai2carla.keys():
