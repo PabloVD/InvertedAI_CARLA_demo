@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 
-# Copyright (c) 2021 Computer Vision Center (CVC) at the Universitat Autonoma de
+# Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma de
 # Barcelona (UAB).
 #
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
 
-"""Example script to generate realistic traffic with the InvertedAI API"""
+"""
+Example script to generate realistic traffic with the InvertedAI API
+"""
 
 import os
 import time
@@ -60,7 +62,8 @@ def argument_parser():
         help='Number of walkers (default: 0)')
     argparser.add_argument(
         '--safe',
-        action='store_true',
+        type=bool,
+        default=True,
         help='Avoid spawning vehicles prone to accidents')
     argparser.add_argument(
         '--filterv',
@@ -147,7 +150,7 @@ def argument_parser():
         default=tuple([0,30])
     )
     argparser.add_argument(
-        '--is-async',
+        '--iai-async',
         type=bool,
         help=f"Whether to call drive asynchronously.",
         default=True
@@ -172,7 +175,7 @@ def argument_parser():
 # Setup CARLA client and world
 def setup_carla_environment(host, port):
 
-    step_length = 0.1 #0.1 is the only step length that is supported at this time
+    step_length = 0.1 # 0.1 is the only step length that is supported by invertedai so far
 
     client = carla.Client(host, port)
     client.set_timeout(200.0)
@@ -187,7 +190,7 @@ def setup_carla_environment(host, port):
 
     return client, world
 
-# Set spectator view
+# Set spectator view on a hero vehicle
 def set_spectator(world, hero_v):
 
     spectator_offset_x = -6.
@@ -244,7 +247,7 @@ def initialize_pedestrians(pedestrians):
 
     return iai_pedestrians_states, iai_pedestrians_properties
 
-# Spawn pedestrians in the simulation
+# Spawn pedestrians in the simulation, which are driven by CARLA controllers (not by invertedai)
 def spawn_pedestrians(client, world, num_pedestrians, bps):
 
     batch = []
@@ -279,7 +282,7 @@ def spawn_pedestrians(client, world, num_pedestrians, bps):
         else:
             walkers_list.append({"id": results[i].actor_id})
 
-    # Spawn IA controllers for pedestrians
+    # Spawn CARLA IA controllers for pedestrians
     batch = []
     walker_controller_bp = world.get_blueprint_library().find('controller.ai.walker')
     for i in range(len(walkers_list)):
@@ -292,7 +295,7 @@ def spawn_pedestrians(client, world, num_pedestrians, bps):
         controller.start()
         dest = world.get_random_location_from_navigation()
         controller.go_to_location(dest)
-        controller.set_max_speed(1 + random.random())
+        controller.set_max_speed(0.5 + random.random())
 
     return pedestrians
 
@@ -368,7 +371,7 @@ def assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_propert
     new_agent_id = 0
     iai2carla = {}
 
-    for agent_id, (state, attr) in enumerate(zip(agent_states,agent_properties)):
+    for agent_id, state in enumerate(agent_states):
 
         if not is_iai[agent_id]:
             agent_properties_new.append(agent_properties[agent_id])
@@ -506,7 +509,6 @@ def initialize_tl_states(world):
     iai_tl_states = assign_iai_traffic_lights_from_carla(world, iai_tl_states, carla2iai_tl)
     return iai_tl_states, carla2iai_tl
 
-
 #---------
 # Main
 #---------
@@ -531,7 +533,7 @@ def main():
         logfolder = os.getcwd()+"/logs/"
         if not os.path.exists(logfolder):
             os.system("mkdir "+logfolder)
-        logfile = logfolder+"record8.log"
+        logfile = logfolder+"carla_record.log"
         client.start_recorder(logfile)
         print("Recording on file: %s" % logfile)
 
@@ -580,7 +582,7 @@ def main():
             location_info_response=location_info_response,
             init_response=response
         )
-        iailog_path = os.path.join(os.getcwd(),f"iailog.json")
+        iailog_path = os.path.join(os.getcwd(),f"iai_log.json")
 
     # Map IAI agents to CARLA actors and update response properties and states
     agent_properties, agent_states_new, recurrent_states_new, iai2carla = assign_carla_blueprints_to_iai_agents(world,vehicle_blueprints,agent_properties,response.agent_states,response.recurrent_states,is_iai,noniai_actors)
@@ -614,7 +616,7 @@ def main():
                 traffic_lights_states = response.traffic_lights_states,
                 light_recurrent_states = None,
                 single_call_agent_limit = args.capacity,
-                async_api_calls = args.is_async,
+                async_api_calls = args.iai_async,
                 api_model_version = args.api_model,
                 random_seed = seed
             )
